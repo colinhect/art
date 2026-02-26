@@ -42,6 +42,7 @@ static void resolve_at_files(
 {
     *out_remaining = calloc((size_t)argc, sizeof(char*));
     *out_files = calloc((size_t)argc, sizeof(char*));
+    if (!*out_remaining || !*out_files) { fprintf(stderr, "Out of memory\n"); exit(1); }
     *out_remaining_count = 0;
     *out_file_count = 0;
 
@@ -159,6 +160,7 @@ static char** parse_tool_patterns(const char* tools_arg)
 
     char** patterns = calloc((size_t)count + 1, sizeof(char*));
     char* tmp = strdup(tools_arg);
+    if (!patterns || !tmp) { fprintf(stderr, "Out of memory\n"); exit(1); }
     char* tok = strtok(tmp, ",");
     int i = 0;
     while (tok)
@@ -265,6 +267,7 @@ int main(int argc, char** argv)
 
     /* Rebuild argv for getopt (prepend program name) */
     char** new_argv = calloc((size_t)remaining_argc + 2, sizeof(char*));
+    if (!new_argv) { fprintf(stderr, "Out of memory\n"); exit(1); }
     new_argv[0] = argv[0];
     for (int i = 0; i < remaining_argc; i++)
     {

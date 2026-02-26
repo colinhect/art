@@ -35,6 +35,7 @@ static char** parse_string_list(yaml_document_t* doc, yaml_node_t* seq)
         count++;
     }
     char** list = calloc((size_t)count + 1, sizeof(char*));
+    if (!list) return NULL;
     int i = 0;
     for (item = seq->data.sequence.items.start; item < seq->data.sequence.items.top; item++)
     {
@@ -280,6 +281,7 @@ int config_load(config_t* cfg, char* errbuf, size_t errlen)
         free(home_cfg);
         if (r < 0)
         {
+            config_free(cfg);
             return -1;
         }
     }
@@ -287,6 +289,7 @@ int config_load(config_t* cfg, char* errbuf, size_t errlen)
     int r = load_config_file(".artifice/config.yaml", cfg, errbuf, errlen);
     if (r < 0)
     {
+        config_free(cfg);
         return -1;
     }
 

@@ -49,14 +49,20 @@ static char* relative_path(const char* path)
     char cwd[4096];
     if (!getcwd(cwd, sizeof(cwd)))
     {
-        return strdup(path);
+        char* s = strdup(path);
+        if (!s) { fprintf(stderr, "Out of memory\n"); exit(1); }
+        return s;
     }
     size_t cwdlen = strlen(cwd);
     if (strncmp(path, cwd, cwdlen) == 0 && path[cwdlen] == '/')
     {
-        return strdup(path + cwdlen + 1);
+        char* s = strdup(path + cwdlen + 1);
+        if (!s) { fprintf(stderr, "Out of memory\n"); exit(1); }
+        return s;
     }
-    return strdup(path);
+    char* s = strdup(path);
+    if (!s) { fprintf(stderr, "Out of memory\n"); exit(1); }
+    return s;
 }
 
 static char* resolve_path(const char* input)
@@ -70,7 +76,10 @@ static char* resolve_path(const char* input)
         {
             snprintf(resolved, sizeof(resolved), "%s%s", home, input + 1);
             char* r = realpath(resolved, NULL);
-            return r ? r : strdup(resolved);
+            if (r) return r;
+            char* s = strdup(resolved);
+            if (!s) { fprintf(stderr, "Out of memory\n"); exit(1); }
+            return s;
         }
     }
     char* r = realpath(input, NULL);
@@ -85,10 +94,14 @@ static char* resolve_path(const char* input)
         if (getcwd(cwd, sizeof(cwd)))
         {
             snprintf(resolved, sizeof(resolved), "%s/%s", cwd, input);
-            return strdup(resolved);
+            char* s = strdup(resolved);
+            if (!s) { fprintf(stderr, "Out of memory\n"); exit(1); }
+            return s;
         }
     }
-    return strdup(input);
+    char* s = strdup(input);
+    if (!s) { fprintf(stderr, "Out of memory\n"); exit(1); }
+    return s;
 }
 
 static int mkdirp(const char* path)
@@ -511,6 +524,7 @@ static char* tool_edit(const cJSON* args)
     size_t new_total = prefix_len + newlen + suffix_len;
 
     char* new_content = malloc(new_total + 1);
+    if (!new_content) { fprintf(stderr, "Out of memory\n"); exit(1); }
     memcpy(new_content, content, prefix_len);
     memcpy(new_content + prefix_len, new_string, newlen);
     memcpy(new_content + prefix_len + newlen, match + oldlen, suffix_len);
