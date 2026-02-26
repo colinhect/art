@@ -296,7 +296,11 @@ int agent_send(agent_t* a, const char* prompt, chunk_fn on_chunk, void* on_chunk
     if (ctx.raw_tc_count > 0)
     {
         tcs = calloc((size_t)ctx.raw_tc_count, sizeof(tool_call_t));
-        if (!tcs) { fprintf(stderr, "Out of memory\n"); exit(1); }
+        if (!tcs)
+        {
+            fprintf(stderr, "Out of memory\n");
+            exit(1);
+        }
         tc_count = ctx.raw_tc_count;
         for (int i = 0; i < ctx.raw_tc_count; i++)
         {

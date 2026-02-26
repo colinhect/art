@@ -35,7 +35,10 @@ static char** parse_string_list(yaml_document_t* doc, yaml_node_t* seq)
         count++;
     }
     char** list = calloc((size_t)count + 1, sizeof(char*));
-    if (!list) return NULL;
+    if (!list)
+    {
+        return NULL;
+    }
     int i = 0;
     for (item = seq->data.sequence.items.start; item < seq->data.sequence.items.top; item++)
     {

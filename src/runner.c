@@ -80,11 +80,19 @@ static void approver_add_always(approver_t* ap, const char* name)
     {
         ap->always_cap = ap->always_cap ? ap->always_cap * 2 : 4;
         char** tmp = realloc(ap->always_allowed, (size_t)ap->always_cap * sizeof(char*));
-        if (!tmp) { fprintf(stderr, "Out of memory\n"); exit(1); }
+        if (!tmp)
+        {
+            fprintf(stderr, "Out of memory\n");
+            exit(1);
+        }
         ap->always_allowed = tmp;
     }
     char* s = strdup(name);
-    if (!s) { fprintf(stderr, "Out of memory\n"); exit(1); }
+    if (!s)
+    {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
     ap->always_allowed[ap->always_count++] = s;
 }
 
@@ -261,7 +269,11 @@ int run_agent_loop(agent_t* agent, const char* prompt, chunk_fn on_chunk, void* 
                 if (!result)
                 {
                     result = strdup("Tool not found or no executor");
-                    if (!result) { fprintf(stderr, "Out of memory\n"); exit(1); }
+                    if (!result)
+                    {
+                        fprintf(stderr, "Out of memory\n");
+                        exit(1);
+                    }
                 }
                 agent_add_tool_result(agent, tc->id, result);
 

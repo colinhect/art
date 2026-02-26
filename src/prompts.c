@@ -46,7 +46,10 @@ static void scan_dir(const char* dirpath, char*** names, int* count, int* cap)
 
         /* Strip .md extension */
         char* base = strndup(name, nlen - 3);
-        if (!base) continue;
+        if (!base)
+        {
+            continue;
+        }
 
         /* Check for duplicates (local overrides home) */
         int found = 0;
@@ -68,7 +71,11 @@ static void scan_dir(const char* dirpath, char*** names, int* count, int* cap)
         {
             *cap = *cap ? *cap * 2 : 16;
             char** tmp = realloc(*names, (size_t)*cap * sizeof(char*));
-            if (!tmp) { free(base); return; }
+            if (!tmp)
+            {
+                free(base);
+                return;
+            }
             *names = tmp;
         }
         (*names)[(*count)++] = base;
