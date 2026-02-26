@@ -218,7 +218,10 @@ int run_agent_loop(agent_t* agent, const char* prompt, chunk_fn on_chunk, void* 
     int ret = agent_send(agent, prompt, on_chunk, on_chunk_data, &resp);
     if (ret < 0)
     {
-        fprintf(stderr, "Error: %s\n", resp.error ? resp.error : "unknown");
+        if (resp.error && resp.error[0])
+        {
+            fprintf(stderr, "Error: %s\n", resp.error);
+        }
         out->text = buf_detach(&final_text);
         agent_response_free(&resp);
         return -1;
@@ -302,7 +305,10 @@ int run_agent_loop(agent_t* agent, const char* prompt, chunk_fn on_chunk, void* 
         ret = agent_send(agent, "", on_chunk, on_chunk_data, &resp);
         if (ret < 0)
         {
-            fprintf(stderr, "Error: %s\n", resp.error ? resp.error : "unknown");
+            if (resp.error && resp.error[0])
+            {
+                fprintf(stderr, "Error: %s\n", resp.error);
+            }
             agent_response_free(&resp);
             break;
         }

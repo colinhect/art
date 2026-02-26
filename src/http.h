@@ -4,6 +4,9 @@
 #include "sse.h"
 
 #include <curl/curl.h>
+#include <signal.h>
+
+extern volatile sig_atomic_t g_http_interrupted;
 
 typedef struct
 {

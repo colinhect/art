@@ -8,6 +8,7 @@
 #include "tools.h"
 
 #include <getopt.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,12 @@
 #include <unistd.h>
 
 #include <curl/curl.h>
+
+static void sigint_handler(int sig)
+{
+    (void)sig;
+    g_http_interrupted = 1;
+}
 
 static void print_chunk(const char* text, void* userdata)
 {
@@ -55,22 +62,15 @@ static void resolve_at_files(
         if (argv[i][0] == '@' && argv[i][1] != '\0')
         {
             const char* filename = argv[i] + 1;
-            if (strchr(filename, '/') || strchr(filename, '\\'))
+            struct stat st;
+            if (stat(filename, &st) == 0 && S_ISREG(st.st_mode))
             {
-                struct stat st;
-                if (stat(filename, &st) == 0 && S_ISREG(st.st_mode))
-                {
-                    (*out_files)[(*out_file_count)++] = strdup(filename);
-                }
-                else
-                {
-                    fprintf(stderr, "Error: File not found: %s\n", filename);
-                    exit(1);
-                }
+                (*out_files)[(*out_file_count)++] = strdup(filename);
             }
             else
             {
-                (*out_remaining)[(*out_remaining_count)++] = argv[i];
+                fprintf(stderr, "Error: File not found: %s\n", filename);
+                exit(1);
             }
         }
         else
@@ -625,18 +625,21 @@ int main(int argc, char** argv)
     agent_init(&agent, &http, ra.model, system_prompt, tool_patterns);
     agent_initialized = 1;
 
+    /* Install SIGINT handler to cancel streaming requests */
+    signal(SIGINT, sigint_handler);
+
     /* Run the agent loop */
     {
         int ret = run_agent_loop(&agent, prompt, print_chunk, NULL, tool_approval, (const char**)(cfg.tool_allowlist),
             opt_tool_output, &result);
-        if (ret < 0)
+        if (ret < 0 && !g_http_interrupted)
         {
             exit_code = 1;
         }
     }
 
     /* Trailing newline */
-    if (result.text && result.text[0] && result.text[strlen(result.text) - 1] != '\n')
+    if (g_http_interrupted || (result.text && result.text[0] && result.text[strlen(result.text) - 1] != '\n'))
     {
         printf("\n");
     }
@@ -679,5 +682,10 @@ cleanup_argv:
     free(remaining_argv);
     free(new_argv);
     free_string_array(attached_files);
+    if (g_http_interrupted)
+    {
+        signal(SIGINT, SIG_DFL);
+        raise(SIGINT);
+    }
     return exit_code;
 }

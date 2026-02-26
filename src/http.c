@@ -2,10 +2,13 @@
 #include "buf.h"
 #include "sse.h"
 
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+
+volatile sig_atomic_t g_http_interrupted = 0;
 
 static const char* ca_paths[] = {
     "/etc/ssl/certs/ca-certificates.crt", /* Debian/Ubuntu */
@@ -36,6 +39,16 @@ static const char* find_ca_bundle(void)
 static size_t curl_sse_write_cb(char* ptr, size_t size, size_t nmemb, void* userdata)
 {
     return sse_feed((sse_parser_t*)userdata, ptr, size * nmemb);
+}
+
+static int curl_xferinfo_cb(void* p, curl_off_t dt, curl_off_t dn, curl_off_t ut, curl_off_t un)
+{
+    (void)p;
+    (void)dt;
+    (void)dn;
+    (void)ut;
+    (void)un;
+    return (int)g_http_interrupted;
 }
 
 int http_init(http_client_t* c, const char* base_url, const char* api_key)
@@ -99,6 +112,8 @@ int http_stream_chat(
     curl_easy_setopt(c->curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(c->curl, CURLOPT_WRITEFUNCTION, curl_sse_write_cb);
     curl_easy_setopt(c->curl, CURLOPT_WRITEDATA, &parser);
+    curl_easy_setopt(c->curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(c->curl, CURLOPT_XFERINFOFUNCTION, curl_xferinfo_cb);
 
     CURLcode res = curl_easy_perform(c->curl);
 
@@ -112,9 +127,16 @@ int http_stream_chat(
     /* Reset for reuse */
     curl_easy_setopt(c->curl, CURLOPT_HTTPHEADER, NULL);
     curl_easy_setopt(c->curl, CURLOPT_POSTFIELDS, NULL);
+    curl_easy_setopt(c->curl, CURLOPT_NOPROGRESS, 1L);
+    curl_easy_setopt(c->curl, CURLOPT_XFERINFOFUNCTION, NULL);
 
     int ret = 0;
-    if (res != CURLE_OK)
+    if (res == CURLE_ABORTED_BY_CALLBACK)
+    {
+        errbuf[0] = '\0';
+        ret = -1;
+    }
+    else if (res != CURLE_OK)
     {
         snprintf(errbuf, errlen, "curl error: %s", curl_easy_strerror(res));
         ret = -1;
