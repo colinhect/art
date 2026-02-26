@@ -73,11 +73,15 @@ static char *build_user_message(const char *prompt_arg, int is_tty,
                 fprintf(stderr, "Error reading %s\n", files[i]);
                 exit(1);
             }
-            fseek(f, 0, SEEK_END);
-            long sz = ftell(f);
-            fseek(f, 0, SEEK_SET);
-            char *content = malloc((size_t)sz + 1);
-            size_t n = fread(content, 1, (size_t)sz, f);
+            struct stat fst;
+            if (fstat(fileno(f), &fst) < 0) {
+                fprintf(stderr, "Error reading %s\n", files[i]);
+                fclose(f);
+                exit(1);
+            }
+            size_t sz = (size_t)fst.st_size;
+            char *content = malloc(sz + 1);
+            size_t n = fread(content, 1, sz, f);
             content[n] = '\0';
             fclose(f);
 
@@ -201,7 +205,15 @@ static void usage(void) {
         "  -h, --help                Show this help\n");
 }
 
+static void free_attached(char **files, int count) {
+    for (int i = 0; i < count; i++)
+        free(files[i]);
+    free(files);
+}
+
 int main(int argc, char **argv) {
+    int exit_code = 0;
+
     /* Resolve @file arguments */
     char **remaining_argv = NULL;
     int remaining_argc = 0;
@@ -254,14 +266,11 @@ int main(int argc, char **argv) {
         case OPT_LOGGING: opt_logging = 1; break;
         case 'h':
             usage();
-            free(remaining_argv);
-            free(new_argv);
-            return 0;
+            goto cleanup_argv;
         default:
             usage();
-            free(remaining_argv);
-            free(new_argv);
-            return 1;
+            exit_code = 1;
+            goto cleanup_argv;
         }
     }
 
@@ -274,13 +283,8 @@ int main(int argc, char **argv) {
 
     /* Handle --install */
     if (opt_install) {
-        int ret = config_install();
-        free(remaining_argv);
-        free(new_argv);
-        for (int i = 0; i < attached_count; i++)
-            free(attached_files[i]);
-        free(attached_files);
-        return ret < 0 ? 1 : 0;
+        exit_code = config_install() < 0 ? 1 : 0;
+        goto cleanup_argv;
     }
 
     /* Handle --add-prompt */
@@ -288,13 +292,13 @@ int main(int argc, char **argv) {
         const char *home = getenv("HOME");
         if (!home) {
             fprintf(stderr, "Cannot determine HOME\n");
-            return 1;
+            exit_code = 1;
+            goto cleanup_argv;
         }
         char dir[4096], dest[4096];
         snprintf(dir, sizeof(dir), "%s/.artifice/prompts", home);
         mkdir(dir, 0755);
 
-        /* Get basename */
         const char *base = strrchr(opt_add_prompt, '/');
         base = base ? base + 1 : opt_add_prompt;
 
@@ -302,20 +306,22 @@ int main(int argc, char **argv) {
         struct stat st;
         if (stat(dest, &st) == 0) {
             fprintf(stderr, "Error: Prompt already exists: %s\n", dest);
-            return 1;
+            exit_code = 1;
+            goto cleanup_argv;
         }
 
-        /* Copy file */
         FILE *src = fopen(opt_add_prompt, "r");
         if (!src) {
             fprintf(stderr, "Error: File not found: %s\n", opt_add_prompt);
-            return 1;
+            exit_code = 1;
+            goto cleanup_argv;
         }
         FILE *dst = fopen(dest, "w");
         if (!dst) {
             fclose(src);
             fprintf(stderr, "Error: Cannot create %s\n", dest);
-            return 1;
+            exit_code = 1;
+            goto cleanup_argv;
         }
         char tmp[4096];
         size_t n;
@@ -324,7 +330,7 @@ int main(int argc, char **argv) {
         fclose(src);
         fclose(dst);
         printf("Added prompt: %s\n", dest);
-        return 0;
+        goto cleanup_argv;
     }
 
     /* Handle --new-prompt */
@@ -332,7 +338,8 @@ int main(int argc, char **argv) {
         const char *home = getenv("HOME");
         if (!home) {
             fprintf(stderr, "Cannot determine HOME\n");
-            return 1;
+            exit_code = 1;
+            goto cleanup_argv;
         }
         char dir[4096], dest[4096];
         snprintf(dir, sizeof(dir), "%s/.artifice/prompts", home);
@@ -348,7 +355,8 @@ int main(int argc, char **argv) {
         struct stat st;
         if (stat(dest, &st) == 0) {
             fprintf(stderr, "Error: Prompt already exists: %s\n", dest);
-            return 1;
+            exit_code = 1;
+            goto cleanup_argv;
         }
 
         if (isatty(STDIN_FILENO))
@@ -360,32 +368,33 @@ int main(int argc, char **argv) {
         if (!f) {
             fprintf(stderr, "Error: Cannot create %s\n", dest);
             free(content);
-            return 1;
+            exit_code = 1;
+            goto cleanup_argv;
         }
         if (content)
             fputs(content, f);
         fclose(f);
         free(content);
         printf("Created prompt: %s\n", dest);
-        return 0;
+        goto cleanup_argv;
     }
 
     /* Load config */
     config_t cfg;
+    int cfg_loaded = 0;
     char errbuf[512];
-    if (config_load(&cfg, errbuf, (int)sizeof(errbuf)) < 0) {
+    if (config_load(&cfg, errbuf, sizeof(errbuf)) < 0) {
         fprintf(stderr, "Configuration error: %s\n", errbuf);
-        return 1;
+        exit_code = 1;
+        goto cleanup_argv;
     }
+    cfg_loaded = 1;
 
     /* Handle --list-agents */
     if (opt_list_agents) {
         for (int i = 0; i < cfg.agent_count; i++)
             printf("%s\n", cfg.agents[i].name);
-        config_free(&cfg);
-        free(remaining_argv);
-        free(new_argv);
-        return 0;
+        goto cleanup_cfg;
     }
 
     /* Handle --list-prompts */
@@ -398,10 +407,7 @@ int main(int argc, char **argv) {
             }
             free(prompts);
         }
-        config_free(&cfg);
-        free(remaining_argv);
-        free(new_argv);
-        return 0;
+        goto cleanup_cfg;
     }
 
     /* Handle --get-current-agent */
@@ -409,62 +415,57 @@ int main(int argc, char **argv) {
         const char *name = opt_agent ? opt_agent : cfg.agent;
         if (!name) {
             fprintf(stderr, "Error: No agent configured\n");
-            config_free(&cfg);
-            return 1;
+            exit_code = 1;
+        } else {
+            printf("%s\n", name);
         }
-        printf("%s\n", name);
-        config_free(&cfg);
-        free(remaining_argv);
-        free(new_argv);
-        return 0;
+        goto cleanup_cfg;
     }
 
     /* Build user message */
     int is_tty = isatty(STDIN_FILENO);
-    char *prompt = build_user_message(prompt_arg, is_tty,
-                                      attached_files, attached_count);
+    char *prompt = NULL;
+    char *system_prompt = NULL;
+    char **tool_patterns = NULL;
+    int ra_loaded = 0;
+    resolved_agent_t ra;
+    int http_initialized = 0;
+    http_client_t http;
+    int agent_initialized = 0;
+    agent_t agent;
+    loop_result_t result;
+    memset(&result, 0, sizeof(result));
 
-    if (!prompt || !prompt[0]) {
-        free(prompt);
-        config_free(&cfg);
-        free(remaining_argv);
-        free(new_argv);
-        for (int i = 0; i < attached_count; i++)
-            free(attached_files[i]);
-        free(attached_files);
-        return 0;
-    }
+    prompt = build_user_message(prompt_arg, is_tty,
+                                attached_files, attached_count);
+
+    if (!prompt || !prompt[0])
+        goto cleanup_all;
 
     /* Resolve agent config */
-    resolved_agent_t ra;
-    if (resolve_agent(&cfg, opt_agent, &ra, errbuf, (int)sizeof(errbuf)) < 0) {
+    if (resolve_agent(&cfg, opt_agent, &ra, errbuf, sizeof(errbuf)) < 0) {
         fprintf(stderr, "Error: %s\n", errbuf);
-        free(prompt);
-        config_free(&cfg);
-        free(remaining_argv);
-        free(new_argv);
-        return 1;
+        exit_code = 1;
+        goto cleanup_all;
     }
+    ra_loaded = 1;
 
     /* Resolve system prompt */
-    char *system_prompt = NULL;
     if (opt_system_prompt) {
         system_prompt = strdup(opt_system_prompt);
     } else if (opt_prompt_name) {
         system_prompt = load_prompt(opt_prompt_name);
         if (!system_prompt) {
             fprintf(stderr, "Error: Unknown prompt '%s'\n", opt_prompt_name);
-            free(prompt);
-            resolved_agent_free(&ra);
-            config_free(&cfg);
-            return 1;
+            exit_code = 1;
+            goto cleanup_all;
         }
     } else if (ra.system_prompt) {
         system_prompt = strdup(ra.system_prompt);
     }
 
     /* Parse tool patterns */
-    char **tool_patterns = parse_tool_patterns(opt_tools);
+    tool_patterns = parse_tool_patterns(opt_tools);
 
     /* Determine tool_approval */
     const char *tool_approval = opt_tool_approval ? opt_tool_approval
@@ -477,31 +478,32 @@ int main(int argc, char **argv) {
     tools_init();
 
     /* Set up HTTP client */
-    const char *base_url = ra.base_url;
-    if (!base_url || !base_url[0])
-        base_url = "https://api.openai.com/v1";
+    {
+        const char *base_url = ra.base_url;
+        if (!base_url || !base_url[0])
+            base_url = "https://api.openai.com/v1";
 
-    http_client_t http;
-    if (http_init(&http, base_url, ra.api_key ? ra.api_key : "") < 0) {
-        fprintf(stderr, "Error: Failed to initialize HTTP client\n");
-        free(prompt);
-        free(system_prompt);
-        free_string_array(tool_patterns);
-        resolved_agent_free(&ra);
-        config_free(&cfg);
-        return 1;
+        if (http_init(&http, base_url, ra.api_key ? ra.api_key : "") < 0) {
+            fprintf(stderr, "Error: Failed to initialize HTTP client\n");
+            exit_code = 1;
+            goto cleanup_all;
+        }
+        http_initialized = 1;
     }
 
     /* Initialize agent */
-    agent_t agent;
     agent_init(&agent, &http, ra.model, system_prompt, tool_patterns);
+    agent_initialized = 1;
 
     /* Run the agent loop */
-    loop_result_t result;
-    int ret = run_agent_loop(&agent, prompt, print_chunk, NULL,
-                             tool_approval,
-                             (const char **)(cfg.tool_allowlist),
-                             opt_tool_output, &result);
+    {
+        int ret = run_agent_loop(&agent, prompt, print_chunk, NULL,
+                                 tool_approval,
+                                 (const char **)(cfg.tool_allowlist),
+                                 opt_tool_output, &result);
+        if (ret < 0)
+            exit_code = 1;
+    }
 
     /* Trailing newline */
     if (result.text && result.text[0] &&
@@ -509,29 +511,31 @@ int main(int argc, char **argv) {
         printf("\n");
 
     /* Save session */
-    if (cfg.save_session && !opt_no_session && ret == 0) {
+    if (cfg.save_session && !opt_no_session && exit_code == 0) {
         char *path = session_save(prompt, system_prompt, ra.model,
                                   ra.provider, result.text);
-        if (path)
-            free(path);
+        free(path);
     }
 
-    /* Cleanup */
+cleanup_all:
     loop_result_free(&result);
-    agent_free(&agent);
-    http_free(&http);
+    if (agent_initialized)
+        agent_free(&agent);
+    if (http_initialized)
+        http_free(&http);
     tools_cleanup();
     curl_global_cleanup();
     free(prompt);
-    /* system_prompt is owned by agent (don't double-free) */
+    free(system_prompt);
     free_string_array(tool_patterns);
-    resolved_agent_free(&ra);
-    config_free(&cfg);
+    if (ra_loaded)
+        resolved_agent_free(&ra);
+cleanup_cfg:
+    if (cfg_loaded)
+        config_free(&cfg);
+cleanup_argv:
     free(remaining_argv);
     free(new_argv);
-    for (int i = 0; i < attached_count; i++)
-        free(attached_files[i]);
-    free(attached_files);
-
-    return ret < 0 ? 1 : 0;
+    free_attached(attached_files, attached_count);
+    return exit_code;
 }

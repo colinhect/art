@@ -36,7 +36,7 @@ typedef struct {
 } agent_response_t;
 
 void agent_init(agent_t *a, http_client_t *http, const char *model,
-                char *system_prompt, char **tool_patterns);
+                const char *system_prompt, char **tool_patterns);
 void agent_free(agent_t *a);
 
 void agent_add_user_message(agent_t *a, const char *content);

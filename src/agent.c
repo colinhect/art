@@ -8,19 +8,20 @@
 #include <string.h>
 
 void agent_init(agent_t *a, http_client_t *http, const char *model,
-                char *system_prompt, char **tool_patterns) {
+                const char *system_prompt, char **tool_patterns) {
     memset(a, 0, sizeof(*a));
     a->messages = cJSON_CreateArray();
     a->http = http;
     a->model = model;
-    a->system_prompt = system_prompt;
+    a->system_prompt = system_prompt ? strdup(system_prompt) : NULL;
     a->tool_patterns = tool_patterns;
 }
 
 void agent_free(agent_t *a) {
     cJSON_Delete(a->messages);
     tool_calls_free(a->pending, a->pending_count);
-    /* system_prompt and tool_patterns are owned by caller */
+    free(a->system_prompt);
+    /* tool_patterns is owned by caller */
 }
 
 void agent_add_user_message(agent_t *a, const char *content) {
@@ -221,7 +222,7 @@ int agent_send(agent_t *a, const char *prompt, chunk_fn on_chunk,
     /* Make the streaming request */
     char errbuf[512] = {0};
     int ret = http_stream_chat(a->http, json_body, on_sse_event, &ctx,
-                               errbuf, (int)sizeof(errbuf));
+                               errbuf, sizeof(errbuf));
     free(json_body);
     if (tools)
         cJSON_Delete(tools);

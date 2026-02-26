@@ -108,7 +108,7 @@ static void parse_agents(yaml_document_t *doc, yaml_node_t *map,
 }
 
 static int load_config_file(const char *path, config_t *cfg,
-                            char *errbuf, int errlen) {
+                            char *errbuf, size_t errlen) {
     FILE *f = fopen(path, "r");
     if (!f)
         return 0; /* not found is OK */
@@ -118,14 +118,14 @@ static int load_config_file(const char *path, config_t *cfg,
     int ret = 0;
 
     if (!yaml_parser_initialize(&parser)) {
-        snprintf(errbuf, (size_t)errlen, "yaml_parser_initialize failed");
+        snprintf(errbuf, errlen, "yaml_parser_initialize failed");
         fclose(f);
         return -1;
     }
     yaml_parser_set_input_file(&parser, f);
 
     if (!yaml_parser_load(&parser, &doc)) {
-        snprintf(errbuf, (size_t)errlen, "Error parsing %s: %s", path,
+        snprintf(errbuf, errlen, "Error parsing %s: %s", path,
                  parser.problem ? parser.problem : "unknown");
         yaml_parser_delete(&parser);
         fclose(f);
@@ -185,7 +185,7 @@ done:
     return ret;
 }
 
-int config_load(config_t *cfg, char *errbuf, int errlen) {
+int config_load(config_t *cfg, char *errbuf, size_t errlen) {
     memset(cfg, 0, sizeof(*cfg));
     cfg->save_session = 1;
 
@@ -229,12 +229,12 @@ void config_free(config_t *cfg) {
 }
 
 int resolve_agent(const config_t *cfg, const char *name,
-                  resolved_agent_t *out, char *errbuf, int errlen) {
+                  resolved_agent_t *out, char *errbuf, size_t errlen) {
     memset(out, 0, sizeof(*out));
 
     const char *agent_name = name ? name : cfg->agent;
     if (!agent_name || !cfg->agents) {
-        snprintf(errbuf, (size_t)errlen,
+        snprintf(errbuf, errlen,
                  "No agent specified. Use --agent or configure a default agent.");
         return -1;
     }
@@ -247,12 +247,12 @@ int resolve_agent(const config_t *cfg, const char *name,
         }
     }
     if (!def) {
-        snprintf(errbuf, (size_t)errlen, "Unknown agent: '%s'", agent_name);
+        snprintf(errbuf, errlen, "Unknown agent: '%s'", agent_name);
         return -1;
     }
 
     if (!def->model) {
-        snprintf(errbuf, (size_t)errlen, "Agent '%s' has no model defined",
+        snprintf(errbuf, errlen, "Agent '%s' has no model defined",
                  agent_name);
         return -1;
     }

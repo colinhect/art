@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define MAX_TOOL_TURNS 50
+
 /* ---- Tool Approver ---- */
 
 typedef struct {
@@ -173,7 +175,13 @@ int run_agent_loop(agent_t *agent, const char *prompt,
     approver_t ap;
     approver_init(&ap, tool_approval, tool_allowlist);
 
+    int turn = 0;
     while (resp.tool_call_count > 0) {
+        if (++turn > MAX_TOOL_TURNS) {
+            fprintf(stderr, "\nMax tool turns (%d) reached. Stopping.\n",
+                    MAX_TOOL_TURNS);
+            break;
+        }
         fprintf(stderr, "\n");
 
         for (int i = 0; i < resp.tool_call_count; i++) {

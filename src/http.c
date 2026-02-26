@@ -33,11 +33,14 @@ static size_t curl_sse_write_cb(char *ptr, size_t size, size_t nmemb,
 }
 
 int http_init(http_client_t *c, const char *base_url, const char *api_key) {
-    c->base_url = base_url;
-    c->api_key = api_key;
+    c->base_url = strdup(base_url ? base_url : "");
+    c->api_key = strdup(api_key ? api_key : "");
     c->curl = curl_easy_init();
-    if (!c->curl)
+    if (!c->curl) {
+        free(c->base_url);
+        free(c->api_key);
         return -1;
+    }
 
     const char *ca = find_ca_bundle();
     if (ca)
@@ -50,11 +53,15 @@ void http_free(http_client_t *c) {
     if (c->curl)
         curl_easy_cleanup(c->curl);
     c->curl = NULL;
+    free(c->base_url);
+    free(c->api_key);
+    c->base_url = NULL;
+    c->api_key = NULL;
 }
 
 int http_stream_chat(http_client_t *c, const char *json_body,
                      sse_event_fn on_event, void *userdata,
-                     char *errbuf, int errlen) {
+                     char *errbuf, size_t errlen) {
     sse_parser_t parser;
     sse_init(&parser, on_event, userdata);
 
@@ -92,15 +99,21 @@ int http_stream_chat(http_client_t *c, const char *json_body,
     curl_easy_setopt(c->curl, CURLOPT_HTTPHEADER, NULL);
     curl_easy_setopt(c->curl, CURLOPT_POSTFIELDS, NULL);
 
+    int ret = 0;
     if (res != CURLE_OK) {
-        snprintf(errbuf, (size_t)errlen, "curl error: %s",
+        snprintf(errbuf, errlen, "curl error: %s",
                  curl_easy_strerror(res));
-        return -1;
-    }
-    if (http_code >= 400) {
-        snprintf(errbuf, (size_t)errlen, "HTTP %ld", http_code);
-        return -1;
+        ret = -1;
+    } else if (http_code >= 400) {
+        /* Include any response body the SSE parser accumulated */
+        if (parser.line_buf.data && parser.line_buf.len > 0)
+            snprintf(errbuf, errlen, "HTTP %ld: %s", http_code,
+                     parser.line_buf.data);
+        else
+            snprintf(errbuf, errlen, "HTTP %ld", http_code);
+        ret = -1;
     }
 
-    return 0;
+    sse_free(&parser);
+    return ret;
 }

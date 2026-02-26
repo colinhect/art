@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 static char *home_prompts_dir(void) {
     const char *home = getenv("HOME");
@@ -100,15 +101,14 @@ char *load_prompt(const char *name) {
         FILE *f = fopen(path, "r");
         if (!f)
             continue;
-        fseek(f, 0, SEEK_END);
-        long sz = ftell(f);
-        fseek(f, 0, SEEK_SET);
-        if (sz < 0) {
+        struct stat fst;
+        if (fstat(fileno(f), &fst) < 0 || !S_ISREG(fst.st_mode)) {
             fclose(f);
             continue;
         }
-        char *buf = malloc((size_t)sz + 1);
-        size_t n = fread(buf, 1, (size_t)sz, f);
+        size_t sz = (size_t)fst.st_size;
+        char *buf = malloc(sz + 1);
+        size_t n = fread(buf, 1, sz, f);
         buf[n] = '\0';
         fclose(f);
         free(hdir);

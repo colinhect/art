@@ -2,13 +2,18 @@
 #include "buf.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <fnmatch.h>
-#include <glob.h>
+#include <ftw.h>
 #include <libgen.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/select.h>
 #include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 /* ---- Tool Executors ---- */
@@ -17,15 +22,14 @@ static char *read_file_contents(const char *path, size_t *out_len) {
     FILE *f = fopen(path, "r");
     if (!f)
         return NULL;
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (sz < 0) {
+    struct stat st;
+    if (fstat(fileno(f), &st) < 0 || !S_ISREG(st.st_mode)) {
         fclose(f);
         return NULL;
     }
-    char *buf = malloc((size_t)sz + 1);
-    size_t n = fread(buf, 1, (size_t)sz, f);
+    size_t sz = (size_t)st.st_size;
+    char *buf = malloc(sz + 1);
+    size_t n = fread(buf, 1, sz, f);
     buf[n] = '\0';
     if (out_len)
         *out_len = n;
@@ -33,18 +37,15 @@ static char *read_file_contents(const char *path, size_t *out_len) {
     return buf;
 }
 
-static const char *relative_path(const char *path) {
-    /* Best-effort: if path starts with cwd, strip it */
-    static char rel[4096];
+/* Returns a malloc'd relative path string. Caller must free. */
+static char *relative_path(const char *path) {
     char cwd[4096];
     if (!getcwd(cwd, sizeof(cwd)))
-        return path;
+        return strdup(path);
     size_t cwdlen = strlen(cwd);
-    if (strncmp(path, cwd, cwdlen) == 0 && path[cwdlen] == '/') {
-        snprintf(rel, sizeof(rel), "%s", path + cwdlen + 1);
-        return rel;
-    }
-    return path;
+    if (strncmp(path, cwd, cwdlen) == 0 && path[cwdlen] == '/')
+        return strdup(path + cwdlen + 1);
+    return strdup(path);
 }
 
 static char *resolve_path(const char *input) {
@@ -93,7 +94,7 @@ static char *tool_read(const cJSON *args) {
         return strdup("Error: 'path' parameter required");
 
     char *path = resolve_path(jp->valuestring);
-    const char *display = relative_path(path);
+    char *display = relative_path(path);
 
     int offset = 0, limit = 0;
     cJSON *joff = cJSON_GetObjectItem(args, "offset");
@@ -108,6 +109,7 @@ static char *tool_read(const cJSON *args) {
         buf_t b = {0};
         buf_printf(&b, "Error: File not found: %s", display);
         free(path);
+        free(display);
         return buf_detach(&b);
     }
 
@@ -117,12 +119,14 @@ static char *tool_read(const cJSON *args) {
         buf_printf(&b, "Error: File too large (%ld bytes): %s",
                    (long)st.st_size, display);
         free(path);
+        free(display);
         return buf_detach(&b);
     }
 
     size_t flen;
     char *content = read_file_contents(path, &flen);
     free(path);
+    free(display);
     if (!content)
         return strdup("Error: Could not read file");
 
@@ -173,21 +177,19 @@ static char *tool_write(const cJSON *args) {
         return strdup("{\"success\":false,\"error\":\"'content' parameter required\"}");
 
     char *path = resolve_path(jp->valuestring);
-    const char *display = relative_path(path);
+    char *display = relative_path(path);
     const char *content = jc->valuestring;
 
     /* Check if file exists */
     struct stat st;
     int is_new = (stat(path, &st) != 0);
 
-    /* Read old content for diff */
-    char **old_lines = NULL;
+    /* Count old lines */
     int old_count = 0;
     if (!is_new) {
         size_t flen;
         char *old = read_file_contents(path, &flen);
         if (old) {
-            /* Count lines */
             const char *p = old;
             while (*p) {
                 old_count++;
@@ -197,7 +199,6 @@ static char *tool_write(const cJSON *args) {
             free(old);
         }
     }
-    (void)old_lines;
 
     /* mkdir -p for parent directory */
     {
@@ -212,6 +213,7 @@ static char *tool_write(const cJSON *args) {
         buf_t b = {0};
         buf_printf(&b, "{\"success\":false,\"error\":\"Cannot write: %s\"}", display);
         free(path);
+        free(display);
         return buf_detach(&b);
     }
     fputs(content, f);
@@ -239,10 +241,48 @@ static char *tool_write(const cJSON *args) {
     char *json = cJSON_PrintUnformatted(result);
     cJSON_Delete(result);
     free(path);
+    free(display);
     return json;
 }
 
 /* ---- glob tool ---- */
+
+/* Thread-local state for nftw callback */
+static struct {
+    const char *pattern;
+    const char *base;
+    size_t base_len;
+    char **results;
+    int count;
+    int cap;
+    int max_results;
+} glob_ctx;
+
+static int glob_nftw_cb(const char *fpath, const struct stat *sb,
+                         int typeflag, struct FTW *ftwbuf) {
+    (void)sb;
+    (void)ftwbuf;
+    if (typeflag != FTW_F)
+        return 0;
+    if (glob_ctx.count >= glob_ctx.max_results)
+        return 0;
+
+    /* Get path relative to base directory */
+    const char *rel = fpath;
+    if (strncmp(fpath, glob_ctx.base, glob_ctx.base_len) == 0 &&
+        fpath[glob_ctx.base_len] == '/')
+        rel = fpath + glob_ctx.base_len + 1;
+
+    if (fnmatch(glob_ctx.pattern, rel, FNM_PATHNAME) == 0) {
+        if (glob_ctx.count >= glob_ctx.cap) {
+            glob_ctx.cap = glob_ctx.cap ? glob_ctx.cap * 2 : 64;
+            glob_ctx.results = realloc(glob_ctx.results,
+                                       (size_t)glob_ctx.cap * sizeof(char *));
+        }
+        glob_ctx.results[glob_ctx.count++] = strdup(fpath);
+    }
+    return 0;
+}
 
 static char *tool_glob(const cJSON *args) {
     cJSON *jp = cJSON_GetObjectItem(args, "pattern");
@@ -254,42 +294,46 @@ static char *tool_glob(const cJSON *args) {
     const char *base = (jpath && cJSON_IsString(jpath)) ? jpath->valuestring : ".";
 
     char *resolved_base = resolve_path(base);
-    const char *display_base = relative_path(resolved_base);
+    char *display_base = relative_path(resolved_base);
 
-    char full_pattern[4096];
-    snprintf(full_pattern, sizeof(full_pattern), "%s/%s", resolved_base, pattern);
+    /* Set up nftw context */
+    glob_ctx.pattern = pattern;
+    glob_ctx.base = resolved_base;
+    glob_ctx.base_len = strlen(resolved_base);
+    glob_ctx.results = NULL;
+    glob_ctx.count = 0;
+    glob_ctx.cap = 0;
+    glob_ctx.max_results = 200;
 
-    glob_t gl;
-    int ret = glob(full_pattern, GLOB_MARK, NULL, &gl);
-    if (ret != 0) {
+    nftw(resolved_base, glob_nftw_cb, 20, FTW_PHYS);
+
+    if (glob_ctx.count == 0) {
         buf_t b = {0};
         buf_printf(&b, "No files matching '%s' in %s", pattern, display_base);
         free(resolved_base);
+        free(display_base);
+        free(glob_ctx.results);
         return buf_detach(&b);
     }
 
     buf_t out = {0};
-    int max_results = 100;
-    int count = 0;
-    for (size_t i = 0; i < gl.gl_pathc && count < max_results; i++) {
-        const char *rel = relative_path(gl.gl_pathv[i]);
-        if (count > 0)
+    int max_display = 100;
+    for (int i = 0; i < glob_ctx.count && i < max_display; i++) {
+        char *rel = relative_path(glob_ctx.results[i]);
+        if (i > 0)
             buf_append_str(&out, "\n");
         buf_append_str(&out, rel);
-        count++;
+        free(rel);
     }
-    if ((int)gl.gl_pathc > max_results)
-        buf_printf(&out, "\n... and %d more", (int)gl.gl_pathc - max_results);
+    if (glob_ctx.count > max_display)
+        buf_printf(&out, "\n... and %d more", glob_ctx.count - max_display);
 
-    globfree(&gl);
+    for (int i = 0; i < glob_ctx.count; i++)
+        free(glob_ctx.results[i]);
+    free(glob_ctx.results);
     free(resolved_base);
+    free(display_base);
 
-    if (out.len == 0) {
-        buf_free(&out);
-        buf_t b = {0};
-        buf_printf(&b, "No files matching '%s' in %s", pattern, display_base);
-        return buf_detach(&b);
-    }
     return buf_detach(&out);
 }
 
@@ -304,7 +348,7 @@ static char *tool_edit(const cJSON *args) {
         return strdup("{\"success\":false,\"error\":\"path, old_string, and new_string required\"}");
 
     char *path = resolve_path(jp->valuestring);
-    const char *display = relative_path(path);
+    char *display = relative_path(path);
     const char *old_string = jo->valuestring;
     const char *new_string = jn->valuestring;
 
@@ -319,6 +363,7 @@ static char *tool_edit(const cJSON *args) {
         char *json = cJSON_PrintUnformatted(r);
         cJSON_Delete(r);
         free(path);
+        free(display);
         return json;
     }
 
@@ -326,6 +371,7 @@ static char *tool_edit(const cJSON *args) {
     char *content = read_file_contents(path, &flen);
     if (!content) {
         free(path);
+        free(display);
         return strdup("{\"success\":false,\"error\":\"Could not read file\"}");
     }
 
@@ -351,6 +397,7 @@ static char *tool_edit(const cJSON *args) {
         cJSON_Delete(r);
         free(content);
         free(path);
+        free(display);
         return json;
     }
 
@@ -368,6 +415,7 @@ static char *tool_edit(const cJSON *args) {
         cJSON_Delete(r);
         free(content);
         free(path);
+        free(display);
         return json;
     }
 
@@ -398,6 +446,7 @@ static char *tool_edit(const cJSON *args) {
         free(new_content);
         free(content);
         free(path);
+        free(display);
         return strdup("{\"success\":false,\"error\":\"Could not write file\"}");
     }
     fwrite(new_content, 1, new_total, f);
@@ -426,6 +475,117 @@ static char *tool_edit(const cJSON *args) {
     free(new_content);
     free(content);
     free(path);
+    free(display);
+    return json;
+}
+
+/* ---- shell tool ---- */
+
+#define SHELL_DEFAULT_TIMEOUT 30
+#define SHELL_MAX_TIMEOUT 300
+#define SHELL_MAX_OUTPUT (512 * 1024) /* 512KB */
+
+static char *tool_shell(const cJSON *args) {
+    cJSON *jcmd = cJSON_GetObjectItem(args, "command");
+    if (!jcmd || !cJSON_IsString(jcmd))
+        return strdup("{\"exit_code\":-1,\"stdout\":\"\",\"error\":\"'command' parameter required\"}");
+
+    int timeout = SHELL_DEFAULT_TIMEOUT;
+    cJSON *jto = cJSON_GetObjectItem(args, "timeout");
+    if (jto && cJSON_IsNumber(jto)) {
+        timeout = jto->valueint;
+        if (timeout < 1)
+            timeout = 1;
+        if (timeout > SHELL_MAX_TIMEOUT)
+            timeout = SHELL_MAX_TIMEOUT;
+    }
+
+    /* Use pipe + fork to get both stdout+stderr and enforce timeout */
+    int pipefd[2];
+    if (pipe(pipefd) < 0)
+        return strdup("{\"exit_code\":-1,\"stdout\":\"\",\"error\":\"pipe() failed\"}");
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return strdup("{\"exit_code\":-1,\"stdout\":\"\",\"error\":\"fork() failed\"}");
+    }
+
+    if (pid == 0) {
+        /* Child: redirect stdout and stderr to pipe */
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        dup2(pipefd[1], STDERR_FILENO);
+        close(pipefd[1]);
+        execl("/bin/sh", "sh", "-c", jcmd->valuestring, (char *)NULL);
+        _exit(127);
+    }
+
+    /* Parent: read output with timeout */
+    close(pipefd[1]);
+
+    buf_t output = {0};
+    int truncated = 0;
+    struct timeval start, now;
+    gettimeofday(&start, NULL);
+
+    /* Set pipe to non-blocking for timeout checks */
+    {
+        int flags = fcntl(pipefd[0], F_GETFL, 0);
+        fcntl(pipefd[0], F_SETFL, flags | O_NONBLOCK);
+    }
+
+    int done = 0;
+    while (!done) {
+        gettimeofday(&now, NULL);
+        int elapsed = (int)(now.tv_sec - start.tv_sec);
+        if (elapsed >= timeout) {
+            kill(pid, SIGKILL);
+            truncated = 1;
+            break;
+        }
+
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(pipefd[0], &rfds);
+        struct timeval tv = {.tv_sec = 1, .tv_usec = 0};
+        int sel = select(pipefd[0] + 1, &rfds, NULL, NULL, &tv);
+        if (sel > 0) {
+            char tmp[4096];
+            ssize_t n = read(pipefd[0], tmp, sizeof(tmp));
+            if (n > 0) {
+                if (output.len + (size_t)n > SHELL_MAX_OUTPUT) {
+                    size_t remaining = SHELL_MAX_OUTPUT - output.len;
+                    if (remaining > 0)
+                        buf_append(&output, tmp, remaining);
+                    truncated = 1;
+                    kill(pid, SIGKILL);
+                    break;
+                }
+                buf_append(&output, tmp, (size_t)n);
+            } else if (n == 0) {
+                done = 1;
+            }
+        }
+    }
+    close(pipefd[0]);
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+    int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddNumberToObject(result, "exit_code", exit_code);
+    cJSON_AddStringToObject(result, "stdout",
+                            output.data ? output.data : "");
+    if (truncated)
+        cJSON_AddStringToObject(result, "note", "Output was truncated");
+    cJSON_AddNullToObject(result, "error");
+
+    char *json = cJSON_PrintUnformatted(result);
+    cJSON_Delete(result);
+    buf_free(&output);
     return json;
 }
 
@@ -449,6 +609,11 @@ tool_def_t TOOLS[] = {
                     "The old_string must appear exactly once.",
      .parameters = NULL,
      .executor = tool_edit},
+    {.name = "shell",
+     .description = "Execute a shell command and return its output (stdout and stderr combined). "
+                    "Use for running tests, builds, git commands, etc.",
+     .parameters = NULL,
+     .executor = tool_shell},
 };
 
 int TOOL_COUNT = sizeof(TOOLS) / sizeof(TOOLS[0]);
@@ -459,6 +624,14 @@ static cJSON *make_param(const char *type, const char *desc) {
     if (desc)
         cJSON_AddStringToObject(p, "description", desc);
     return p;
+}
+
+static void set_tool_params(const char *name, cJSON *params) {
+    tool_def_t *t = tools_find(name);
+    if (t)
+        t->parameters = params;
+    else
+        cJSON_Delete(params);
 }
 
 void tools_init(void) {
@@ -477,7 +650,7 @@ void tools_init(void) {
         cJSON_AddItemToObject(props, "limit",
                               make_param("integer", "Maximum number of lines to read."));
         cJSON_AddItemToObject(params, "properties", props);
-        TOOLS[0].parameters = params;
+        set_tool_params("read", params);
     }
     /* write */
     {
@@ -493,7 +666,7 @@ void tools_init(void) {
         cJSON_AddItemToObject(props, "content",
                               make_param("string", "Content to write to the file."));
         cJSON_AddItemToObject(params, "properties", props);
-        TOOLS[1].parameters = params;
+        set_tool_params("write", params);
     }
     /* glob */
     {
@@ -508,7 +681,7 @@ void tools_init(void) {
         cJSON_AddItemToObject(props, "path",
                               make_param("string", "Directory to search in (default: current directory)."));
         cJSON_AddItemToObject(params, "properties", props);
-        TOOLS[2].parameters = params;
+        set_tool_params("glob", params);
     }
     /* edit */
     {
@@ -527,7 +700,22 @@ void tools_init(void) {
         cJSON_AddItemToObject(props, "new_string",
                               make_param("string", "The replacement text."));
         cJSON_AddItemToObject(params, "properties", props);
-        TOOLS[3].parameters = params;
+        set_tool_params("edit", params);
+    }
+    /* shell */
+    {
+        cJSON *params = cJSON_CreateObject();
+        cJSON_AddStringToObject(params, "type", "object");
+        cJSON *req = cJSON_CreateArray();
+        cJSON_AddItemToArray(req, cJSON_CreateString("command"));
+        cJSON_AddItemToObject(params, "required", req);
+        cJSON *props = cJSON_CreateObject();
+        cJSON_AddItemToObject(props, "command",
+                              make_param("string", "Shell command to execute."));
+        cJSON_AddItemToObject(props, "timeout",
+                              make_param("integer", "Timeout in seconds (default: 30, max: 300)."));
+        cJSON_AddItemToObject(params, "properties", props);
+        set_tool_params("shell", params);
     }
 }
 

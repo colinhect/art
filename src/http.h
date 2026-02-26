@@ -6,8 +6,8 @@
 #include <curl/curl.h>
 
 typedef struct {
-    const char *base_url;
-    const char *api_key;
+    char *base_url;
+    char *api_key;
     CURL *curl;
 } http_client_t;
 
@@ -19,6 +19,6 @@ void http_free(http_client_t *c);
  * Returns 0 on success, -1 on error. errbuf receives error details. */
 int http_stream_chat(http_client_t *c, const char *json_body,
                      sse_event_fn on_event, void *userdata,
-                     char *errbuf, int errlen);
+                     char *errbuf, size_t errlen);
 
 #endif
