@@ -5,6 +5,15 @@ LIBS     = -lcurl -lyaml
 
 # For static builds: CC=musl-gcc LDFLAGS=-static make
 # For static with mbedtls: add -lmbedtls -lmbedx509 -lmbedcrypto
+# For sanitizers: SANITIZE=address make  (or thread, undefined, memory)
+# For extra checks: ANALYZE=1 make
+ifdef SANITIZE
+CFLAGS  += -O1 -g -fsanitize=$(SANITIZE) -fno-omit-frame-pointer
+LDFLAGS += -fsanitize=$(SANITIZE)
+endif
+ifdef ANALYZE
+CFLAGS  += -fanalyzer
+endif
 
 SRCS = src/main.c src/buf.c src/config.c src/prompts.c \
        src/http.c src/sse.c src/api.c src/agent.c \
