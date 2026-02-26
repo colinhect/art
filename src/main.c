@@ -252,15 +252,6 @@ static void usage(void)
         "  -h, --help                Show this help\n");
 }
 
-static void free_attached(char** files, int count)
-{
-    for (int i = 0; i < count; i++)
-    {
-        free(files[i]);
-    }
-    free(files);
-}
-
 int main(int argc, char** argv)
 {
     int exit_code = 0;
@@ -541,6 +532,7 @@ int main(int argc, char** argv)
     char** tool_patterns = NULL;
     int ra_loaded = 0;
     resolved_agent_t ra;
+    int curl_initialized = 0;
     int http_initialized = 0;
     http_client_t http;
     int agent_initialized = 0;
@@ -592,6 +584,7 @@ int main(int argc, char** argv)
 
     /* Initialize curl globally */
     curl_global_init(CURL_GLOBAL_DEFAULT);
+    curl_initialized = 1;
 
     /* Initialize tools */
     tools_init();
@@ -650,8 +643,11 @@ cleanup_all:
     {
         http_free(&http);
     }
-    tools_cleanup();
-    curl_global_cleanup();
+    if (curl_initialized)
+    {
+        tools_cleanup();
+        curl_global_cleanup();
+    }
     free(prompt);
     free(system_prompt);
     free_string_array(tool_patterns);
@@ -667,6 +663,6 @@ cleanup_cfg:
 cleanup_argv:
     free(remaining_argv);
     free(new_argv);
-    free_attached(attached_files, attached_count);
+    free_string_array(attached_files);
     return exit_code;
 }

@@ -651,6 +651,10 @@ static char* tool_shell(const cJSON* args)
         FD_SET(pipefd[0], &rfds);
         struct timeval tv = { .tv_sec = 1, .tv_usec = 0 };
         int sel = select(pipefd[0] + 1, &rfds, NULL, NULL, &tv);
+        if (sel < 0)
+        {
+            break;
+        }
         if (sel > 0)
         {
             char tmp[4096];
