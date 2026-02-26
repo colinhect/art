@@ -61,7 +61,7 @@ static char* relative_path(const char* path)
 
 static char* resolve_path(const char* input)
 {
-    char resolved[4096];
+    char resolved[8192];
     /* Handle ~ expansion */
     if (input[0] == '~' && (input[1] == '/' || input[1] == '\0'))
     {

@@ -372,7 +372,7 @@ int main(int argc, char** argv)
             exit_code = 1;
             goto cleanup_argv;
         }
-        char dir[4096], dest[4096];
+        char dir[4096], dest[8192];
         snprintf(dir, sizeof(dir), "%s/.artifice/prompts", home);
         mkdir(dir, 0755);
 
@@ -425,7 +425,7 @@ int main(int argc, char** argv)
             exit_code = 1;
             goto cleanup_argv;
         }
-        char dir[4096], dest[4096];
+        char dir[4096], dest[8192];
         snprintf(dir, sizeof(dir), "%s/.artifice/prompts", home);
         mkdir(dir, 0755);
 
