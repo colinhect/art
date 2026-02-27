@@ -13,15 +13,21 @@ void agent_init(agent_t* a, http_client_t* http, const char* model, const char* 
     a->messages = cJSON_CreateArray();
     a->http = http;
     a->model = model;
-    a->system_prompt = system_prompt ? strdup(system_prompt) : NULL;
     a->tool_patterns = tool_patterns;
+
+    if (system_prompt && system_prompt[0])
+    {
+        cJSON* sys_msg = cJSON_CreateObject();
+        cJSON_AddStringToObject(sys_msg, "role", "system");
+        cJSON_AddStringToObject(sys_msg, "content", system_prompt);
+        cJSON_AddItemToArray(a->messages, sys_msg);
+    }
 }
 
 void agent_free(agent_t* a)
 {
     cJSON_Delete(a->messages);
     tool_calls_free(a->pending, a->pending_count);
-    free(a->system_prompt);
     /* tool_patterns is owned by caller */
 }
 
@@ -221,29 +227,6 @@ int agent_send(agent_t* a, const char* prompt, chunk_fn on_chunk, void* on_chunk
         }
     }
 
-    /* Build messages with system prompt prepended */
-    cJSON* messages = cJSON_Duplicate(a->messages, 1);
-    if (a->system_prompt && a->system_prompt[0])
-    {
-        int has_system = 0;
-        if (cJSON_GetArraySize(messages) > 0)
-        {
-            cJSON* first = cJSON_GetArrayItem(messages, 0);
-            cJSON* role = cJSON_GetObjectItem(first, "role");
-            if (role && cJSON_IsString(role) && strcmp(role->valuestring, "system") == 0)
-            {
-                has_system = 1;
-            }
-        }
-        if (!has_system)
-        {
-            cJSON* sys_msg = cJSON_CreateObject();
-            cJSON_AddStringToObject(sys_msg, "role", "system");
-            cJSON_AddStringToObject(sys_msg, "content", a->system_prompt);
-            cJSON_InsertItemInArray(messages, 0, sys_msg);
-        }
-    }
-
     /* Get tool schemas */
     cJSON* tools = NULL;
     if (a->tool_patterns && a->tool_patterns[0])
@@ -252,8 +235,7 @@ int agent_send(agent_t* a, const char* prompt, chunk_fn on_chunk, void* on_chunk
     }
 
     /* Build request */
-    char* json_body = api_build_request(a->model, messages, tools);
-    cJSON_Delete(messages);
+    char* json_body = api_build_request(a->model, a->messages, tools);
 
     /* Set up SSE context */
     send_ctx_t ctx;

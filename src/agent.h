@@ -24,7 +24,6 @@ typedef struct
     /* Provider config */
     http_client_t* http;
     const char* model;
-    char* system_prompt;
     char** tool_patterns; /* NULL-terminated, e.g. {"*", NULL} */
 } agent_t;
 
