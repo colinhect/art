@@ -7,6 +7,8 @@
 #include "session.h"
 #include "tools.h"
 
+#include "spinner.h"
+
 #include <getopt.h>
 #include <signal.h>
 #include <stdio.h>
@@ -17,6 +19,18 @@
 
 #include <curl/curl.h>
 
+static void spinner_turn_start_cb(void* userdata)
+{
+    (void)userdata;
+    spinner_turn_start();
+}
+
+static void spinner_turn_end_cb(void* userdata)
+{
+    (void)userdata;
+    spinner_turn_end();
+}
+
 static void sigint_handler(int sig)
 {
     (void)sig;
@@ -26,8 +40,7 @@ static void sigint_handler(int sig)
 static void print_chunk(const char* text, void* userdata)
 {
     (void)userdata;
-    fputs(text, stdout);
-    fflush(stdout);
+    spinner_write_chunk(text);
 }
 
 /* Read all of stdin into a malloc'd string. */
@@ -663,15 +676,26 @@ int main(int argc, char** argv)
     /* Install SIGINT handler to cancel streaming requests */
     signal(SIGINT, sigint_handler);
 
+    /* Show pulsing indicator on stderr while waiting for the model.
+       Spinner writes only to stderr so piped stdout is unaffected. */
+    int stderr_tty = isatty(STDERR_FILENO);
+    if (stderr_tty)
+        spinner_start();
+
     /* Run the agent loop */
     {
-        int ret = run_agent_loop(&agent, prompt, print_chunk, NULL, tool_approval, (const char**)(cfg.tool_allowlist),
+        int ret = run_agent_loop(&agent, prompt, print_chunk, NULL,
+            stderr_tty ? spinner_turn_start_cb : NULL,
+            stderr_tty ? spinner_turn_end_cb   : NULL,
+            tool_approval, (const char**)(cfg.tool_allowlist),
             opt_tool_output, &result);
         if (ret < 0 && !g_http_interrupted)
         {
             exit_code = 1;
         }
     }
+
+    spinner_stop();
 
     /* Trailing newline */
     if (g_http_interrupted || (result.text && result.text[0] && result.text[strlen(result.text) - 1] != '\n'))
