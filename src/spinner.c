@@ -26,11 +26,15 @@ static const char* const s_frames[] = {
 };
 static const int s_nframes = 14;
 
-static pthread_mutex_t s_mutex   = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t  s_cond    = PTHREAD_COND_INITIALIZER;
-static volatile int    s_active  = 0; /* thread loop condition */
-static volatile int    s_enabled = 0; /* whether to draw frames */
-static int             s_started = 0; /* thread exists */
+#define CHUNK_TIMEOUT_NS 1000000000L /* 1 s */
+
+static pthread_mutex_t s_mutex      = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  s_cond       = PTHREAD_COND_INITIALIZER;
+static volatile int    s_active     = 0; /* thread loop condition */
+static volatile int    s_enabled    = 0; /* whether to draw frames */
+static volatile int    s_in_turn    = 0; /* inside a model request */
+static struct timespec s_last_chunk;     /* time of last chunk (or turn start) */
+static int             s_started    = 0; /* thread exists */
 static pthread_t       s_thread;
 
 static void clear_frame(void)
@@ -69,6 +73,20 @@ static void* thread_fn(void* arg)
             fflush(stderr);
             frame++;
         }
+        else if (s_in_turn)
+        {
+            /* Re-enable spinner after 1 s with no chunk. */
+            struct timespec now;
+            clock_gettime(CLOCK_REALTIME, &now);
+            long diff_ns = (now.tv_sec - s_last_chunk.tv_sec) * 1000000000L
+                         + (now.tv_nsec - s_last_chunk.tv_nsec);
+            if (diff_ns >= CHUNK_TIMEOUT_NS)
+            {
+                save_cursor();
+                s_enabled = 1;
+                frame = 0;
+            }
+        }
 
         struct timespec ts;
         clock_gettime(CLOCK_REALTIME, &ts);
@@ -91,6 +109,7 @@ void spinner_start(void)
         return;
     s_active  = 1;
     s_enabled = 0;
+    s_in_turn = 0;
     s_started = 1;
     pthread_create(&s_thread, NULL, thread_fn, NULL);
 }
@@ -112,8 +131,11 @@ void spinner_turn_start(void)
     if (!s_started)
         return;
     pthread_mutex_lock(&s_mutex);
-    save_cursor();
-    s_enabled = 1;
+    s_in_turn = 1;
+    /* Show immediately — set last_chunk far in the past so the threshold
+       is already exceeded on the first thread tick. */
+    s_last_chunk.tv_sec  = 0;
+    s_last_chunk.tv_nsec = 0;
     pthread_cond_signal(&s_cond);
     pthread_mutex_unlock(&s_mutex);
 }
@@ -123,6 +145,7 @@ void spinner_turn_end(void)
     if (!s_started)
         return;
     pthread_mutex_lock(&s_mutex);
+    s_in_turn = 0;
     if (s_enabled)
     {
         clear_frame();
@@ -141,19 +164,14 @@ void spinner_write_chunk(const char* text)
     }
 
     pthread_mutex_lock(&s_mutex);
-    int was_enabled = s_enabled;
-    if (was_enabled)
+    if (s_enabled)
     {
         clear_frame();
         s_enabled = 0;
     }
     fputs(text, stdout);
     fflush(stdout);
-    if (was_enabled)
-    {
-        save_cursor();
-        s_enabled = 1;
-        pthread_cond_signal(&s_cond);
-    }
+    /* Record when this chunk arrived so the thread can restart the 1 s timer. */
+    clock_gettime(CLOCK_REALTIME, &s_last_chunk);
     pthread_mutex_unlock(&s_mutex);
 }

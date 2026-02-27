@@ -230,6 +230,7 @@ enum
     OPT_GET_CURRENT_AGENT,
     OPT_SET_AGENT,
     OPT_LOGGING,
+    OPT_NO_SPINNER,
 };
 
 static struct option long_options[] = {
@@ -248,6 +249,7 @@ static struct option long_options[] = {
     { "get-current-agent", no_argument, 0, OPT_GET_CURRENT_AGENT },
     { "set-agent", required_argument, 0, OPT_SET_AGENT },
     { "logging", no_argument, 0, OPT_LOGGING },
+    { "no-spinner", no_argument, 0, OPT_NO_SPINNER },
     { "help", no_argument, 0, 'h' },
     { 0, 0, 0, 0 },
 };
@@ -275,6 +277,7 @@ static void usage(void)
         "      --get-current-agent   Print current agent and exit\n"
         "      --set-agent NAME      Set default agent in config\n"
         "      --logging             Enable debug logging to stderr\n"
+        "      --no-spinner          Disable the progress spinner\n"
         "  -h, --help                Show this help\n");
 }
 
@@ -319,6 +322,7 @@ int main(int argc, char** argv)
     int opt_get_current_agent = 0;
     char* opt_set_agent = NULL;
     int opt_logging = 0;
+    int opt_no_spinner = 0;
 
     optind = 1;
     int c;
@@ -370,6 +374,9 @@ int main(int argc, char** argv)
             break;
         case OPT_LOGGING:
             opt_logging = 1;
+            break;
+        case OPT_NO_SPINNER:
+            opt_no_spinner = 1;
             break;
         case 'h':
             usage();
@@ -678,15 +685,15 @@ int main(int argc, char** argv)
 
     /* Show pulsing indicator on stderr while waiting for the model.
        Spinner writes only to stderr so piped stdout is unaffected. */
-    int stderr_tty = isatty(STDERR_FILENO);
-    if (stderr_tty)
+    int use_spinner = isatty(STDERR_FILENO) && !opt_no_spinner;
+    if (use_spinner)
         spinner_start();
 
     /* Run the agent loop */
     {
         int ret = run_agent_loop(&agent, prompt, print_chunk, NULL,
-            stderr_tty ? spinner_turn_start_cb : NULL,
-            stderr_tty ? spinner_turn_end_cb   : NULL,
+            use_spinner ? spinner_turn_start_cb : NULL,
+            use_spinner ? spinner_turn_end_cb   : NULL,
             tool_approval, (const char**)(cfg.tool_allowlist),
             opt_tool_output, &result);
         if (ret < 0 && !g_http_interrupted)
