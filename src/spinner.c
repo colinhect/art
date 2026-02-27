@@ -4,17 +4,27 @@
 #include <stdio.h>
 #include <time.h>
 
+/* Breathing dot using the terminal's system cyan (16-color palette) so it
+   respects the user's color theme.  Inhale (3 frames) is faster than
+   exhale (5 frames), and a long rest at the minimum creates the organic
+   pause between breaths.  120 ms ticks give a ~2 s cycle. */
 static const char* const s_frames[] = {
-    "\033[38;5;237m▌\033[0m",
-    "\033[38;5;241m▌\033[0m",
-    "\033[38;5;245m▌\033[0m",
-    "\033[38;5;249m▌\033[0m",
-    "\033[38;5;253m▌\033[0m",
-    "\033[38;5;249m▌\033[0m",
-    "\033[38;5;245m▌\033[0m",
-    "\033[38;5;241m▌\033[0m",
+    "\033[2;36m·\033[0m",   /* rest     */
+    "\033[2;36m·\033[0m",   /* rest     */
+    "\033[2;36m·\033[0m",   /* rest     */
+    "\033[2;36m·\033[0m",   /* rest     */
+    "\033[2;36m·\033[0m",   /* rest     */
+    "\033[36m·\033[0m",     /* inhale ↑ */
+    "\033[36m•\033[0m",     /* inhale ↑ */
+    "\033[1;36m●\033[0m",   /* peak     */
+    "\033[1;36m•\033[0m",   /* exhale ↓ */
+    "\033[1;36m•\033[0m",   /* exhale ↓ */
+    "\033[36m•\033[0m",     /* exhale ↓ */
+    "\033[36m·\033[0m",     /* exhale ↓ */
+    "\033[2;36m·\033[0m",   /* exhale ↓ */
+    "\033[2;36m·\033[0m",   /* settling */
 };
-static const int s_nframes = 8;
+static const int s_nframes = 14;
 
 static pthread_mutex_t s_mutex   = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  s_cond    = PTHREAD_COND_INITIALIZER;
@@ -62,7 +72,7 @@ static void* thread_fn(void* arg)
 
         struct timespec ts;
         clock_gettime(CLOCK_REALTIME, &ts);
-        ts.tv_nsec += 80000000L; /* 80 ms */
+        ts.tv_nsec += 120000000L; /* 120 ms */
         if (ts.tv_nsec >= 1000000000L)
         {
             ts.tv_sec++;
