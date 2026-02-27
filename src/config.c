@@ -408,6 +408,122 @@ void resolved_agent_free(resolved_agent_t* ra)
     free_string_list(ra->tools);
 }
 
+int config_set_agent(const char* name)
+{
+    char* cfg_path = home_path("/.artifice/config.yaml");
+    if (!cfg_path)
+    {
+        fprintf(stderr, "Cannot determine HOME directory\n");
+        return -1;
+    }
+
+    /* Read existing file */
+    FILE* f = fopen(cfg_path, "r");
+    if (!f)
+    {
+        fprintf(stderr, "Cannot open %s\n", cfg_path);
+        free(cfg_path);
+        return -1;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long fsize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    char* content = malloc((size_t)fsize + 1);
+    if (!content)
+    {
+        fprintf(stderr, "Out of memory\n");
+        fclose(f);
+        free(cfg_path);
+        return -1;
+    }
+    size_t nread = fread(content, 1, (size_t)fsize, f);
+    content[nread] = '\0';
+    fclose(f);
+
+    /* Build new line */
+    char new_line[512];
+    snprintf(new_line, sizeof(new_line), "agent: %s", name);
+
+    /* Scan for existing agent: line */
+    char* result = NULL;
+    char* line_start = content;
+    char* found_start = NULL;
+    char* found_end = NULL;
+
+    while (*line_start)
+    {
+        char* line_end = strchr(line_start, '\n');
+        size_t line_len = line_end ? (size_t)(line_end - line_start) : strlen(line_start);
+
+        if (strncmp(line_start, "agent:", 6) == 0)
+        {
+            found_start = line_start;
+            found_end = line_end ? line_end : line_start + line_len;
+            break;
+        }
+
+        if (!line_end)
+        {
+            break;
+        }
+        line_start = line_end + 1;
+    }
+
+    if (found_start)
+    {
+        /* Replace the line */
+        size_t prefix_len = (size_t)(found_start - content);
+        size_t suffix_len = strlen(found_end);
+        size_t new_len = prefix_len + strlen(new_line) + suffix_len + 1;
+        result = malloc(new_len);
+        if (!result)
+        {
+            fprintf(stderr, "Out of memory\n");
+            free(content);
+            free(cfg_path);
+            return -1;
+        }
+        memcpy(result, content, prefix_len);
+        memcpy(result + prefix_len, new_line, strlen(new_line));
+        memcpy(result + prefix_len + strlen(new_line), found_end, suffix_len);
+        result[prefix_len + strlen(new_line) + suffix_len] = '\0';
+    }
+    else
+    {
+        /* Prepend agent line */
+        size_t new_len = strlen(new_line) + 1 + strlen(content) + 1;
+        result = malloc(new_len);
+        if (!result)
+        {
+            fprintf(stderr, "Out of memory\n");
+            free(content);
+            free(cfg_path);
+            return -1;
+        }
+        snprintf(result, new_len, "%s\n%s", new_line, content);
+    }
+
+    free(content);
+
+    /* Write back */
+    f = fopen(cfg_path, "w");
+    if (!f)
+    {
+        fprintf(stderr, "Cannot write %s\n", cfg_path);
+        free(result);
+        free(cfg_path);
+        return -1;
+    }
+    fputs(result, f);
+    fclose(f);
+
+    free(result);
+    free(cfg_path);
+    return 0;
+}
+
 int config_install(void)
 {
     char* dir = home_path("/.artifice");

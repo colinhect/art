@@ -215,6 +215,7 @@ enum
     OPT_LIST_AGENTS,
     OPT_LIST_PROMPTS,
     OPT_GET_CURRENT_AGENT,
+    OPT_SET_AGENT,
     OPT_LOGGING,
 };
 
@@ -232,6 +233,7 @@ static struct option long_options[] = {
     { "list-agents", no_argument, 0, OPT_LIST_AGENTS },
     { "list-prompts", no_argument, 0, OPT_LIST_PROMPTS },
     { "get-current-agent", no_argument, 0, OPT_GET_CURRENT_AGENT },
+    { "set-agent", required_argument, 0, OPT_SET_AGENT },
     { "logging", no_argument, 0, OPT_LOGGING },
     { "help", no_argument, 0, 'h' },
     { 0, 0, 0, 0 },
@@ -258,6 +260,7 @@ static void usage(void)
         "      --list-agents         List agents and exit\n"
         "      --list-prompts        List prompts and exit\n"
         "      --get-current-agent   Print current agent and exit\n"
+        "      --set-agent NAME      Set default agent in config\n"
         "      --logging             Enable debug logging to stderr\n"
         "  -h, --help                Show this help\n");
 }
@@ -301,6 +304,7 @@ int main(int argc, char** argv)
     int opt_list_agents = 0;
     int opt_list_prompts = 0;
     int opt_get_current_agent = 0;
+    char* opt_set_agent = NULL;
     int opt_logging = 0;
 
     optind = 1;
@@ -347,6 +351,9 @@ int main(int argc, char** argv)
             break;
         case OPT_GET_CURRENT_AGENT:
             opt_get_current_agent = 1;
+            break;
+        case OPT_SET_AGENT:
+            opt_set_agent = optarg;
             break;
         case OPT_LOGGING:
             opt_logging = 1;
@@ -520,6 +527,34 @@ int main(int argc, char** argv)
                 free(prompts[i]);
             }
             free(prompts);
+        }
+        goto cleanup_cfg;
+    }
+
+    /* Handle --set-agent */
+    if (opt_set_agent)
+    {
+        int found = 0;
+        for (int i = 0; i < cfg.agent_count; i++)
+        {
+            if (strcmp(cfg.agents[i].name, opt_set_agent) == 0)
+            {
+                found = 1;
+                break;
+            }
+        }
+        if (!found)
+        {
+            fprintf(stderr, "Unknown agent: '%s'\n", opt_set_agent);
+            exit_code = 1;
+        }
+        else if (config_set_agent(opt_set_agent) < 0)
+        {
+            exit_code = 1;
+        }
+        else
+        {
+            printf("Default agent set to '%s'\n", opt_set_agent);
         }
         goto cleanup_cfg;
     }

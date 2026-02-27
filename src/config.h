@@ -53,4 +53,7 @@ void resolved_agent_free(resolved_agent_t* ra);
 /* Install default config to ~/.artifice/ */
 int config_install(void);
 
+/* Set the default agent in ~/.artifice/config.yaml */
+int config_set_agent(const char* name);
+
 #endif
