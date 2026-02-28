@@ -26,6 +26,7 @@ COPILOT_LIB   = $(COPILOT_BUILD)/libcopilot_sdk_cpp.a
 SRCS = src/main.c src/buf.c src/config.c src/prompts.c \
        src/http.c src/sse.c src/api.c src/agent.c \
        src/runner.c src/tools.c src/session.c src/spinner.c src/util.c \
+       src/copilot_agent.c \
        vendor/cJSON/cJSON.c
 
 OBJS = $(SRCS:.c=.o)

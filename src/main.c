@@ -1,6 +1,7 @@
 #include "agent.h"
 #include "buf.h"
 #include "config.h"
+#include "copilot_agent.h"
 #include "http.h"
 #include "prompts.h"
 #include "runner.h"
@@ -624,34 +625,6 @@ int main(int argc, char** argv)
     /* Determine tool_approval */
     const char* tool_approval = opt_tool_approval ? opt_tool_approval : cfg.tool_approval;
 
-    /* Initialize curl globally */
-    curl_global_init(CURL_GLOBAL_DEFAULT);
-    curl_initialized = 1;
-
-    /* Initialize tools */
-    tools_init();
-
-    /* Set up HTTP client */
-    {
-        const char* base_url = ra.base_url;
-        if (!base_url || !base_url[0])
-        {
-            base_url = "https://api.openai.com/v1";
-        }
-
-        if (http_init(&http, base_url, ra.api_key ? ra.api_key : "") < 0)
-        {
-            fprintf(stderr, "Error: Failed to initialize HTTP client\n");
-            exit_code = 1;
-            goto cleanup_all;
-        }
-        http_initialized = 1;
-    }
-
-    /* Initialize agent */
-    agent_init(&agent, &http, ra.model, system_prompt, tool_patterns);
-    agent_initialized = 1;
-
     /* Install SIGINT handler to cancel streaming requests */
     signal(SIGINT, sigint_handler);
 
@@ -663,30 +636,104 @@ int main(int argc, char** argv)
         spinner_start();
     }
 
-    /* Run the agent loop */
+    if (ra.provider && strcmp(ra.provider, "copilot") == 0)
     {
-        int ret = run_agent_loop(&agent, prompt, print_chunk, NULL, use_spinner ? spinner_turn_start_cb : NULL,
-            use_spinner ? spinner_turn_end_cb : NULL, tool_approval, (const char**)(cfg.tool_allowlist),
-            opt_tool_output, &result);
+        /* Copilot path — skip HTTP, use copilot SDK directly */
+        tools_init();
+
+        copilot_result_t cp_result;
+        int ret = run_copilot_agent(ra.model, system_prompt, prompt,
+            tool_patterns, tool_approval,
+            (const char**)cfg.tool_allowlist,
+            opt_tool_output,
+            print_chunk, NULL,
+            use_spinner ? spinner_turn_start_cb : NULL,
+            use_spinner ? spinner_turn_end_cb : NULL,
+            &cp_result);
+
+        spinner_stop();
+
         if (ret < 0 && !g_http_interrupted)
         {
             exit_code = 1;
         }
+
+        /* Trailing newline */
+        if (g_http_interrupted
+            || (cp_result.text && cp_result.text[0]
+                && cp_result.text[strlen(cp_result.text) - 1] != '\n'))
+        {
+            printf("\n");
+        }
+
+        /* Save session */
+        if (cfg.save_session && !opt_no_session && exit_code == 0)
+        {
+            char* path = session_save(prompt, system_prompt, ra.model, ra.provider, cp_result.text);
+            free(path);
+        }
+
+        result.text = cp_result.text;
+        cp_result.text = NULL;
     }
-
-    spinner_stop();
-
-    /* Trailing newline */
-    if (g_http_interrupted || (result.text && result.text[0] && result.text[strlen(result.text) - 1] != '\n'))
+    else
     {
-        printf("\n");
-    }
+        /* HTTP path */
+        curl_global_init(CURL_GLOBAL_DEFAULT);
+        curl_initialized = 1;
 
-    /* Save session */
-    if (cfg.save_session && !opt_no_session && exit_code == 0)
-    {
-        char* path = session_save(prompt, system_prompt, ra.model, ra.provider, result.text);
-        free(path);
+        tools_init();
+
+        /* Set up HTTP client */
+        {
+            const char* base_url = ra.base_url;
+            if (!base_url || !base_url[0])
+            {
+                base_url = "https://api.openai.com/v1";
+            }
+
+            if (http_init(&http, base_url, ra.api_key ? ra.api_key : "") < 0)
+            {
+                fprintf(stderr, "Error: Failed to initialize HTTP client\n");
+                exit_code = 1;
+                spinner_stop();
+                goto cleanup_all;
+            }
+            http_initialized = 1;
+        }
+
+        /* Initialize agent */
+        agent_init(&agent, &http, ra.model, system_prompt, tool_patterns);
+        agent_initialized = 1;
+
+        /* Run the agent loop */
+        {
+            int ret = run_agent_loop(&agent, prompt, print_chunk, NULL,
+                use_spinner ? spinner_turn_start_cb : NULL,
+                use_spinner ? spinner_turn_end_cb : NULL, tool_approval,
+                (const char**)(cfg.tool_allowlist),
+                opt_tool_output, &result);
+            if (ret < 0 && !g_http_interrupted)
+            {
+                exit_code = 1;
+            }
+        }
+
+        spinner_stop();
+
+        /* Trailing newline */
+        if (g_http_interrupted
+            || (result.text && result.text[0] && result.text[strlen(result.text) - 1] != '\n'))
+        {
+            printf("\n");
+        }
+
+        /* Save session */
+        if (cfg.save_session && !opt_no_session && exit_code == 0)
+        {
+            char* path = session_save(prompt, system_prompt, ra.model, ra.provider, result.text);
+            free(path);
+        }
     }
 
 cleanup_all:
