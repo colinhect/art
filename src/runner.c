@@ -208,19 +208,22 @@ static void format_tool_args(const tool_call_t* tc, buf_t* out)
 
 /* ---- Agent Loop ---- */
 
-int run_agent_loop(agent_t* agent, const char* prompt, chunk_fn on_chunk, void* on_chunk_data,
-    turn_fn on_turn_start, turn_fn on_turn_end,
-    const char* tool_approval, const char** tool_allowlist, int tool_output, loop_result_t* out)
+int run_agent_loop(agent_t* agent, const char* prompt, chunk_fn on_chunk, void* on_chunk_data, turn_fn on_turn_start,
+    turn_fn on_turn_end, const char* tool_approval, const char** tool_allowlist, int tool_output, loop_result_t* out)
 {
     memset(out, 0, sizeof(*out));
     buf_t final_text = { 0 };
 
     agent_response_t resp;
     if (on_turn_start)
+    {
         on_turn_start(on_chunk_data);
+    }
     int ret = agent_send(agent, prompt, on_chunk, on_chunk_data, &resp);
     if (on_turn_end)
+    {
         on_turn_end(on_chunk_data);
+    }
     if (ret < 0)
     {
         if (resp.error && resp.error[0])
@@ -308,10 +311,14 @@ int run_agent_loop(agent_t* agent, const char* prompt, chunk_fn on_chunk, void* 
 
         /* Send empty prompt to get follow-up response */
         if (on_turn_start)
+        {
             on_turn_start(on_chunk_data);
+        }
         ret = agent_send(agent, "", on_chunk, on_chunk_data, &resp);
         if (on_turn_end)
+        {
             on_turn_end(on_chunk_data);
+        }
         if (ret < 0)
         {
             if (resp.error && resp.error[0])

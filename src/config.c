@@ -1,25 +1,11 @@
 #include "config.h"
+#include "util.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <yaml.h>
-
-static char* xstrdup(const char* s) { return s ? strdup(s) : NULL; }
-
-static char* home_path(const char* suffix)
-{
-    const char* home = getenv("HOME");
-    if (!home)
-    {
-        return NULL;
-    }
-    size_t len = strlen(home) + strlen(suffix) + 1;
-    char* p = malloc(len);
-    snprintf(p, len, "%s%s", home, suffix);
-    return p;
-}
 
 /* Parse a YAML sequence of scalars into a NULL-terminated string array. */
 static char** parse_string_list(yaml_document_t* doc, yaml_node_t* seq)
@@ -49,19 +35,6 @@ static char** parse_string_list(yaml_document_t* doc, yaml_node_t* seq)
         }
     }
     return list;
-}
-
-static void free_string_list(char** list)
-{
-    if (!list)
-    {
-        return;
-    }
-    for (int i = 0; list[i]; i++)
-    {
-        free(list[i]);
-    }
-    free(list);
 }
 
 /* Parse an agent definition from a YAML mapping node. */
@@ -227,11 +200,6 @@ static int load_config_file(const char* path, config_t* cfg, char* errbuf, size_
                 free(cfg->system_prompt);
                 cfg->system_prompt = strdup(v);
             }
-            else if (strcmp(k, "prompt_prefix") == 0)
-            {
-                free(cfg->prompt_prefix);
-                cfg->prompt_prefix = strdup(v);
-            }
         }
         else if (val && val->type == YAML_MAPPING_NODE)
         {
@@ -324,7 +292,6 @@ void config_free(config_t* cfg)
     free(cfg->tool_approval);
     free_string_list(cfg->tool_allowlist);
     free(cfg->system_prompt);
-    free(cfg->prompt_prefix);
 }
 
 int resolve_agent(const config_t* cfg, const char* name, resolved_agent_t* out, char* errbuf, size_t errlen)
@@ -380,21 +347,6 @@ int resolve_agent(const config_t* cfg, const char* name, resolved_agent_t* out, 
         out->system_prompt = xstrdup(cfg->system_prompt);
     }
 
-    /* Copy tools */
-    if (def->tools)
-    {
-        int n = 0;
-        while (def->tools[n])
-        {
-            n++;
-        }
-        out->tools = calloc((size_t)n + 1, sizeof(char*));
-        for (int i = 0; i < n; i++)
-        {
-            out->tools[i] = strdup(def->tools[i]);
-        }
-    }
-
     return 0;
 }
 
@@ -405,7 +357,6 @@ void resolved_agent_free(resolved_agent_t* ra)
     free(ra->provider);
     free(ra->base_url);
     free(ra->system_prompt);
-    free_string_list(ra->tools);
 }
 
 int config_set_agent(const char* name)
@@ -564,7 +515,6 @@ int config_install(void)
 
     fprintf(f,
         "# Artifice configuration\n"
-        "# See https://github.com/... for documentation\n"
         "\n"
         "agent: default\n"
         "\n"

@@ -28,7 +28,6 @@ typedef struct
     int save_session; /* default 1 */
 
     char* system_prompt;
-    char* prompt_prefix;
 } config_t;
 
 typedef struct
@@ -38,7 +37,6 @@ typedef struct
     char* provider;
     char* base_url;
     char* system_prompt;
-    char** tools; /* NULL-terminated */
 } resolved_agent_t;
 
 /* Load config from ~/.artifice/config.yaml and ./.artifice/config.yaml.

@@ -6,6 +6,7 @@
 #include "runner.h"
 #include "session.h"
 #include "tools.h"
+#include "util.h"
 
 #include "spinner.h"
 
@@ -102,24 +103,12 @@ static char* build_user_message(const char* prompt_arg, int is_tty, char** files
     {
         for (int i = 0; i < file_count; i++)
         {
-            FILE* f = fopen(files[i], "r");
-            if (!f)
+            char* content = read_file_contents(files[i], NULL);
+            if (!content)
             {
                 fprintf(stderr, "Error reading %s\n", files[i]);
                 exit(1);
             }
-            struct stat fst;
-            if (fstat(fileno(f), &fst) < 0)
-            {
-                fprintf(stderr, "Error reading %s\n", files[i]);
-                fclose(f);
-                exit(1);
-            }
-            size_t sz = (size_t)fst.st_size;
-            char* content = malloc(sz + 1);
-            size_t n = fread(content, 1, sz, f);
-            content[n] = '\0';
-            fclose(f);
 
             if (msg.len > 0)
             {
@@ -203,19 +192,6 @@ static char** parse_tool_patterns(const char* tools_arg)
     return patterns;
 }
 
-static void free_string_array(char** arr)
-{
-    if (!arr)
-    {
-        return;
-    }
-    for (int i = 0; arr[i]; i++)
-    {
-        free(arr[i]);
-    }
-    free(arr);
-}
-
 enum
 {
     OPT_TOOLS = 256,
@@ -229,7 +205,6 @@ enum
     OPT_LIST_PROMPTS,
     OPT_GET_CURRENT_AGENT,
     OPT_SET_AGENT,
-    OPT_LOGGING,
     OPT_NO_SPINNER,
 };
 
@@ -248,7 +223,6 @@ static struct option long_options[] = {
     { "list-prompts", no_argument, 0, OPT_LIST_PROMPTS },
     { "get-current-agent", no_argument, 0, OPT_GET_CURRENT_AGENT },
     { "set-agent", required_argument, 0, OPT_SET_AGENT },
-    { "logging", no_argument, 0, OPT_LOGGING },
     { "no-spinner", no_argument, 0, OPT_NO_SPINNER },
     { "help", no_argument, 0, 'h' },
     { 0, 0, 0, 0 },
@@ -276,7 +250,6 @@ static void usage(void)
         "      --list-prompts        List prompts and exit\n"
         "      --get-current-agent   Print current agent and exit\n"
         "      --set-agent NAME      Set default agent in config\n"
-        "      --logging             Enable debug logging to stderr\n"
         "      --no-spinner          Disable the progress spinner\n"
         "  -h, --help                Show this help\n");
 }
@@ -321,7 +294,6 @@ int main(int argc, char** argv)
     int opt_list_prompts = 0;
     int opt_get_current_agent = 0;
     char* opt_set_agent = NULL;
-    int opt_logging = 0;
     int opt_no_spinner = 0;
 
     optind = 1;
@@ -372,9 +344,6 @@ int main(int argc, char** argv)
         case OPT_SET_AGENT:
             opt_set_agent = optarg;
             break;
-        case OPT_LOGGING:
-            opt_logging = 1;
-            break;
         case OPT_NO_SPINNER:
             opt_no_spinner = 1;
             break;
@@ -395,8 +364,6 @@ int main(int argc, char** argv)
         prompt_arg = new_argv[optind];
     }
 
-    (void)opt_logging; /* TODO: structured logging */
-
     /* Handle --install */
     if (opt_install)
     {
@@ -407,16 +374,15 @@ int main(int argc, char** argv)
     /* Handle --add-prompt */
     if (opt_add_prompt)
     {
-        const char* home = getenv("HOME");
-        if (!home)
+        char* dir = home_path("/.artifice/prompts");
+        if (!dir)
         {
             fprintf(stderr, "Cannot determine HOME\n");
             exit_code = 1;
             goto cleanup_argv;
         }
-        char dir[4096], dest[8192];
-        snprintf(dir, sizeof(dir), "%s/.artifice/prompts", home);
         mkdir(dir, 0755);
+        char dest[8192];
 
         const char* base = strrchr(opt_add_prompt, '/');
         base = base ? base + 1 : opt_add_prompt;
@@ -427,6 +393,7 @@ int main(int argc, char** argv)
         {
             fprintf(stderr, "Error: Prompt already exists: %s\n", dest);
             exit_code = 1;
+            free(dir);
             goto cleanup_argv;
         }
 
@@ -435,6 +402,7 @@ int main(int argc, char** argv)
         {
             fprintf(stderr, "Error: File not found: %s\n", opt_add_prompt);
             exit_code = 1;
+            free(dir);
             goto cleanup_argv;
         }
         FILE* dst = fopen(dest, "w");
@@ -443,6 +411,7 @@ int main(int argc, char** argv)
             fclose(src);
             fprintf(stderr, "Error: Cannot create %s\n", dest);
             exit_code = 1;
+            free(dir);
             goto cleanup_argv;
         }
         char tmp[4096];
@@ -454,22 +423,22 @@ int main(int argc, char** argv)
         fclose(src);
         fclose(dst);
         printf("Added prompt: %s\n", dest);
+        free(dir);
         goto cleanup_argv;
     }
 
     /* Handle --new-prompt */
     if (opt_new_prompt)
     {
-        const char* home = getenv("HOME");
-        if (!home)
+        char* dir = home_path("/.artifice/prompts");
+        if (!dir)
         {
             fprintf(stderr, "Cannot determine HOME\n");
             exit_code = 1;
             goto cleanup_argv;
         }
-        char dir[4096], dest[8192];
-        snprintf(dir, sizeof(dir), "%s/.artifice/prompts", home);
         mkdir(dir, 0755);
+        char dest[8192];
 
         const char* name = opt_new_prompt;
         size_t nlen = strlen(name);
@@ -487,6 +456,7 @@ int main(int argc, char** argv)
         {
             fprintf(stderr, "Error: Prompt already exists: %s\n", dest);
             exit_code = 1;
+            free(dir);
             goto cleanup_argv;
         }
 
@@ -501,6 +471,7 @@ int main(int argc, char** argv)
             fprintf(stderr, "Error: Cannot create %s\n", dest);
             free(content);
             exit_code = 1;
+            free(dir);
             goto cleanup_argv;
         }
         if (content)
@@ -510,6 +481,7 @@ int main(int argc, char** argv)
         fclose(f);
         free(content);
         printf("Created prompt: %s\n", dest);
+        free(dir);
         goto cleanup_argv;
     }
 
@@ -687,14 +659,14 @@ int main(int argc, char** argv)
        Spinner writes only to stderr so piped stdout is unaffected. */
     int use_spinner = isatty(STDERR_FILENO) && !opt_no_spinner;
     if (use_spinner)
+    {
         spinner_start();
+    }
 
     /* Run the agent loop */
     {
-        int ret = run_agent_loop(&agent, prompt, print_chunk, NULL,
-            use_spinner ? spinner_turn_start_cb : NULL,
-            use_spinner ? spinner_turn_end_cb   : NULL,
-            tool_approval, (const char**)(cfg.tool_allowlist),
+        int ret = run_agent_loop(&agent, prompt, print_chunk, NULL, use_spinner ? spinner_turn_start_cb : NULL,
+            use_spinner ? spinner_turn_end_cb : NULL, tool_approval, (const char**)(cfg.tool_allowlist),
             opt_tool_output, &result);
         if (ret < 0 && !g_http_interrupted)
         {
@@ -734,7 +706,7 @@ cleanup_all:
     }
     free(prompt);
     free(system_prompt);
-    free_string_array(tool_patterns);
+    free_string_list(tool_patterns);
     if (ra_loaded)
     {
         resolved_agent_free(&ra);
@@ -747,7 +719,7 @@ cleanup_cfg:
 cleanup_argv:
     free(remaining_argv);
     free(new_argv);
-    free_string_array(attached_files);
+    free_string_list(attached_files);
     if (g_http_interrupted)
     {
         signal(SIGINT, SIG_DFL);

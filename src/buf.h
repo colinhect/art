@@ -1,7 +1,6 @@
 #ifndef BUF_H
 #define BUF_H
 
-#include <stdarg.h>
 #include <stddef.h>
 
 typedef struct

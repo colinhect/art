@@ -56,6 +56,11 @@ void buf_append_str(buf_t* b, const char* s)
 
 void buf_printf(buf_t* b, const char* fmt, ...)
 {
+    if (fmt == NULL)
+    {
+        return;
+    }
+
     va_list ap;
     va_start(ap, fmt);
     int n = vsnprintf(NULL, 0, fmt, ap);

@@ -1,4 +1,5 @@
 #include "prompts.h"
+#include "util.h"
 
 #include <dirent.h>
 #include <stdio.h>
@@ -6,19 +7,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-static char* home_prompts_dir(void)
-{
-    const char* home = getenv("HOME");
-    if (!home)
-    {
-        return NULL;
-    }
-    size_t len = strlen(home) + strlen("/.artifice/prompts") + 1;
-    char* p = malloc(len);
-    snprintf(p, len, "%s/.artifice/prompts", home);
-    return p;
-}
 
 static int dir_exists(const char* path)
 {
@@ -95,7 +83,7 @@ char** list_prompts(void)
     }
 
     /* Then home */
-    char* hdir = home_prompts_dir();
+    char* hdir = home_path("/.artifice/prompts");
     if (hdir)
     {
         if (dir_exists(hdir))
@@ -121,7 +109,7 @@ char* load_prompt(const char* name)
     const char* dirs[2];
     char local_dir[] = ".artifice/prompts";
     dirs[0] = local_dir;
-    char* hdir = home_prompts_dir();
+    char* hdir = home_path("/.artifice/prompts");
     dirs[1] = hdir;
 
     char path[4096];
@@ -136,22 +124,11 @@ char* load_prompt(const char* name)
             continue;
         }
         snprintf(path, sizeof(path), "%s/%s.md", dirs[i], name);
-        FILE* f = fopen(path, "r");
-        if (!f)
+        char* buf = read_file_contents(path, NULL);
+        if (!buf)
         {
             continue;
         }
-        struct stat fst;
-        if (fstat(fileno(f), &fst) < 0 || !S_ISREG(fst.st_mode))
-        {
-            fclose(f);
-            continue;
-        }
-        size_t sz = (size_t)fst.st_size;
-        char* buf = malloc(sz + 1);
-        size_t n = fread(buf, 1, sz, f);
-        buf[n] = '\0';
-        fclose(f);
         free(hdir);
         return buf;
     }

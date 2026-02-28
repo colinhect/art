@@ -11,9 +11,6 @@ typedef struct
     char* (*executor)(const cJSON* args);
 } tool_def_t;
 
-extern tool_def_t TOOLS[];
-extern int TOOL_COUNT;
-
 /* Initialize tool parameter schemas. Call once at startup. */
 void tools_init(void);
 void tools_cleanup(void);

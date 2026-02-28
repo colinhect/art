@@ -1,5 +1,6 @@
 #include "tools.h"
 #include "buf.h"
+#include "util.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -7,6 +8,7 @@
 #include <ftw.h>
 #include <libgen.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,31 +19,6 @@
 #include <unistd.h>
 
 /* ---- Tool Executors ---- */
-
-static char* read_file_contents(const char* path, size_t* out_len)
-{
-    FILE* f = fopen(path, "r");
-    if (!f)
-    {
-        return NULL;
-    }
-    struct stat st;
-    if (fstat(fileno(f), &st) < 0 || !S_ISREG(st.st_mode))
-    {
-        fclose(f);
-        return NULL;
-    }
-    size_t sz = (size_t)st.st_size;
-    char* buf = malloc(sz + 1);
-    size_t n = fread(buf, 1, sz, f);
-    buf[n] = '\0';
-    if (out_len)
-    {
-        *out_len = n;
-    }
-    fclose(f);
-    return buf;
-}
 
 /* Returns a malloc'd relative path string. Caller must free. */
 static char* relative_path(const char* path)
@@ -444,6 +421,36 @@ static char* tool_glob(const cJSON* args)
 
 /* ---- edit tool ---- */
 
+static int count_lines(const char* s)
+{
+    int n = 1;
+    for (; *s; s++)
+    {
+        if (*s == '\n')
+        {
+            n++;
+        }
+    }
+    return n;
+}
+
+static char* edit_error(const char* fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    char* msg = NULL;
+    vasprintf(&msg, fmt, ap);
+    va_end(ap);
+
+    cJSON* r = cJSON_CreateObject();
+    cJSON_AddBoolToObject(r, "success", 0);
+    cJSON_AddStringToObject(r, "error", msg ? msg : "unknown error");
+    free(msg);
+    char* json = cJSON_PrintUnformatted(r);
+    cJSON_Delete(r);
+    return json;
+}
+
 static char* tool_edit(const cJSON* args)
 {
     cJSON* jp = cJSON_GetObjectItem(args, "path");
@@ -463,17 +470,10 @@ static char* tool_edit(const cJSON* args)
     struct stat st;
     if (stat(path, &st) != 0 || !S_ISREG(st.st_mode))
     {
-        cJSON* r = cJSON_CreateObject();
-        cJSON_AddBoolToObject(r, "success", 0);
-        buf_t eb = { 0 };
-        buf_printf(&eb, "File not found: %s", display);
-        cJSON_AddStringToObject(r, "error", eb.data);
-        buf_free(&eb);
-        char* json = cJSON_PrintUnformatted(r);
-        cJSON_Delete(r);
+        char* err = edit_error("File not found: %s", display);
         free(path);
         free(display);
-        return json;
+        return err;
     }
 
     size_t flen;
@@ -499,37 +499,22 @@ static char* tool_edit(const cJSON* args)
 
     if (count == 0)
     {
-        cJSON* r = cJSON_CreateObject();
-        cJSON_AddBoolToObject(r, "success", 0);
-        buf_t eb = { 0 };
-        buf_printf(&eb, "String not found in %s", display);
-        cJSON_AddStringToObject(r, "error", eb.data);
-        buf_free(&eb);
-        char* json = cJSON_PrintUnformatted(r);
-        cJSON_Delete(r);
+        char* err = edit_error("String not found in %s", display);
         free(content);
         free(path);
         free(display);
-        return json;
+        return err;
     }
 
     if (count > 1)
     {
-        cJSON* r = cJSON_CreateObject();
-        cJSON_AddBoolToObject(r, "success", 0);
-        buf_t eb = { 0 };
-        buf_printf(&eb,
-            "String found %d times in %s. Provide a more specific "
-            "string with surrounding context.",
+        char* err = edit_error("String found %d times in %s. Provide a more specific "
+                               "string with surrounding context.",
             count, display);
-        cJSON_AddStringToObject(r, "error", eb.data);
-        buf_free(&eb);
-        char* json = cJSON_PrintUnformatted(r);
-        cJSON_Delete(r);
         free(content);
         free(path);
         free(display);
-        return json;
+        return err;
     }
 
     /* Find the match position and line number */
@@ -575,22 +560,8 @@ static char* tool_edit(const cJSON* args)
     fclose(f);
 
     /* Count old and new lines in the replaced segments */
-    int old_line_count = 1;
-    for (const char* p = old_string; *p; p++)
-    {
-        if (*p == '\n')
-        {
-            old_line_count++;
-        }
-    }
-    int new_line_count = 1;
-    for (const char* p = new_string; *p; p++)
-    {
-        if (*p == '\n')
-        {
-            new_line_count++;
-        }
-    }
+    int old_line_count = count_lines(old_string);
+    int new_line_count = count_lines(new_string);
 
     cJSON* result = cJSON_CreateObject();
     cJSON_AddBoolToObject(result, "success", 1);
@@ -748,7 +719,7 @@ static char* tool_shell(const cJSON* args)
 
 /* ---- Tool Registry ---- */
 
-tool_def_t TOOLS[] = {
+static tool_def_t TOOLS[] = {
     { .name = "read", .description = "Read the contents of a file.", .parameters = NULL, .executor = tool_read },
     { .name = "write",
         .description = "Write or create a file with the given content.",
@@ -771,7 +742,7 @@ tool_def_t TOOLS[] = {
         .executor = tool_shell },
 };
 
-int TOOL_COUNT = sizeof(TOOLS) / sizeof(TOOLS[0]);
+static int TOOL_COUNT = sizeof(TOOLS) / sizeof(TOOLS[0]);
 
 static cJSON* make_param(const char* type, const char* desc)
 {
