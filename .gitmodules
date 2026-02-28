@@ -1,0 +1,3 @@
+[submodule "vendor/copilot-sdk-cpp"]
+	path = vendor/copilot-sdk-cpp
+	url = https://github.com/0xeb/copilot-sdk-cpp
