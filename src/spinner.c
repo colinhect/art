@@ -184,3 +184,24 @@ void spinner_write_chunk(const char* text)
     clock_gettime(CLOCK_REALTIME, &s_last_chunk);
     pthread_mutex_unlock(&s_mutex);
 }
+
+void spinner_write_reasoning_chunk(const char* text)
+{
+    if (!s_started)
+    {
+        fprintf(stderr, "\033[2m%s\033[0m", text);
+        fflush(stderr);
+        return;
+    }
+
+    pthread_mutex_lock(&s_mutex);
+    if (s_enabled)
+    {
+        clear_frame();
+        s_enabled = 0;
+    }
+    fprintf(stderr, "\033[2m%s\033[0m", text);
+    fflush(stderr);
+    clock_gettime(CLOCK_REALTIME, &s_last_chunk);
+    pthread_mutex_unlock(&s_mutex);
+}

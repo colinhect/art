@@ -47,6 +47,8 @@ static copilot_event_type map_event_type(copilot::SessionEventType t)
 		return COPILOT_EVENT_ASSISTANT_MESSAGE;
 	case copilot::SessionEventType::AssistantMessageDelta:
 		return COPILOT_EVENT_ASSISTANT_MESSAGE_DELTA;
+	case copilot::SessionEventType::AssistantReasoningDelta:
+		return COPILOT_EVENT_ASSISTANT_REASONING_DELTA;
 	case copilot::SessionEventType::ToolExecutionStart:
 		return COPILOT_EVENT_TOOL_EXECUTION_START;
 	case copilot::SessionEventType::ToolExecutionComplete:
@@ -63,6 +65,12 @@ static std::string event_data_json(const copilot::SessionEvent &evt)
 	if (auto *d = evt.try_as<copilot::AssistantMessageDeltaData>()) {
 		copilot::json j;
 		j["message_id"] = d->message_id;
+		j["delta"] = d->delta_content;
+		return j.dump();
+	}
+	if (auto *d = evt.try_as<copilot::AssistantReasoningDeltaData>()) {
+		copilot::json j;
+		j["reasoning_id"] = d->reasoning_id;
 		j["delta"] = d->delta_content;
 		return j.dump();
 	}

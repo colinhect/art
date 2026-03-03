@@ -48,7 +48,7 @@ void agent_pop_last_user_message(agent_t* a);
 /* Send a prompt (may be empty for tool result follow-up).
  * Streams chunks via on_chunk callback. Blocks until done.
  * Returns 0 on success. On error, out->error is set. */
-int agent_send(agent_t* a, const char* prompt, chunk_fn on_chunk, void* on_chunk_data, agent_response_t* out);
+int agent_send(agent_t* a, const char* prompt, chunk_fn on_chunk, chunk_fn on_reasoning_chunk, void* on_chunk_data, agent_response_t* out);
 
 void agent_response_free(agent_response_t* r);
 

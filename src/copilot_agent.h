@@ -16,7 +16,7 @@ int run_copilot_agent(const char* model, const char* system_prompt,
     const char* prompt, char** tool_patterns,
     const char* tool_approval, const char** tool_allowlist,
     int tool_output,
-    chunk_fn on_chunk, void* on_chunk_data,
+    chunk_fn on_chunk, chunk_fn on_reasoning_chunk, void* on_chunk_data,
     turn_fn on_turn_start, turn_fn on_turn_end,
     copilot_result_t* out);
 

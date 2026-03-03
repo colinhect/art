@@ -142,7 +142,9 @@ typedef struct
     int input_tokens;
     int output_tokens;
     chunk_fn on_chunk;
+    chunk_fn on_reasoning_chunk;
     void* on_chunk_data;
+    int reasoning_seen; /* non-zero once any reasoning delta has been streamed */
 } send_ctx_t;
 
 static void on_sse_event(const char* json, size_t len, void* userdata)
@@ -155,13 +157,28 @@ static void on_sse_event(const char* json, size_t len, void* userdata)
     }
 
     /* Accumulate content and stream to caller */
-    if (d.content)
+    if (d.content && d.content[0])
     {
         buf_append_str(&ctx->text, d.content);
         if (ctx->on_chunk)
         {
+            if (ctx->reasoning_seen)
+            {
+                ctx->on_reasoning_chunk("\n\n", ctx->on_chunk_data);
+                ctx->reasoning_seen = 0;
+            }
             ctx->on_chunk(d.content, ctx->on_chunk_data);
         }
+    }
+
+    /* Stream reasoning content if present */
+    if (d.reasoning_content)
+    {
+        if (ctx->on_reasoning_chunk)
+        {
+            ctx->on_reasoning_chunk(d.reasoning_content, ctx->on_chunk_data);
+        }
+        ctx->reasoning_seen = 1;
     }
 
     /* Accumulate tool call fragments */
@@ -210,7 +227,7 @@ static void on_sse_event(const char* json, size_t len, void* userdata)
     delta_free(&d);
 }
 
-int agent_send(agent_t* a, const char* prompt, chunk_fn on_chunk, void* on_chunk_data, agent_response_t* out)
+int agent_send(agent_t* a, const char* prompt, chunk_fn on_chunk, chunk_fn on_reasoning_chunk, void* on_chunk_data, agent_response_t* out)
 {
     memset(out, 0, sizeof(*out));
 
@@ -242,6 +259,7 @@ int agent_send(agent_t* a, const char* prompt, chunk_fn on_chunk, void* on_chunk
     memset(&ctx, 0, sizeof(ctx));
     buf_init(&ctx.text);
     ctx.on_chunk = on_chunk;
+    ctx.on_reasoning_chunk = on_reasoning_chunk;
     ctx.on_chunk_data = on_chunk_data;
 
     /* Make the streaming request */

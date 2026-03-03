@@ -31,4 +31,8 @@ void spinner_turn_end(void);
    streamed chunk so the spinner reappears between slow chunks. */
 void spinner_write_chunk(const char* text);
 
+/* Like spinner_write_chunk but renders text in dim (ANSI SGR 2) style for
+   reasoning / thinking deltas. */
+void spinner_write_reasoning_chunk(const char* text);
+
 #endif

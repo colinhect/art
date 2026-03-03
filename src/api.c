@@ -75,6 +75,17 @@ int api_parse_delta(const char* json, size_t len, delta_t* out)
         out->content = strdup(content->valuestring);
     }
 
+    /* Reasoning content (OpenAI: "reasoning_content", Ollama: "reasoning") */
+    cJSON* reasoning = cJSON_GetObjectItem(delta, "reasoning_content");
+    if (!reasoning)
+    {
+        reasoning = cJSON_GetObjectItem(delta, "reasoning");
+    }
+    if (cJSON_IsString(reasoning))
+    {
+        out->reasoning_content = strdup(reasoning->valuestring);
+    }
+
     /* Tool calls */
     cJSON* tcs = cJSON_GetObjectItem(delta, "tool_calls");
     if (tcs && cJSON_GetArraySize(tcs) > 0)
@@ -115,6 +126,7 @@ int api_parse_delta(const char* json, size_t len, delta_t* out)
 void delta_free(delta_t* d)
 {
     free(d->content);
+    free(d->reasoning_content);
     free(d->tc_id);
     free(d->tc_name);
     free(d->tc_arguments);

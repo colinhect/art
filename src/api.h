@@ -8,6 +8,7 @@
 typedef struct
 {
     char* content; /* text delta (may be NULL) */
+    char* reasoning_content; /* reasoning/thinking delta (may be NULL) */
     int tool_call_index; /* -1 if no tool call in this chunk */
     char* tc_id; /* tool call ID fragment */
     char* tc_name; /* function name fragment */

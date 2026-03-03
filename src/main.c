@@ -45,6 +45,12 @@ static void print_chunk(const char* text, void* userdata)
     spinner_write_chunk(text);
 }
 
+static void print_reasoning_chunk(const char* text, void* userdata)
+{
+    (void)userdata;
+    spinner_write_reasoning_chunk(text);
+}
+
 /* Read all of stdin into a malloc'd string. */
 static char* read_stdin(void)
 {
@@ -646,7 +652,7 @@ int main(int argc, char** argv)
             tool_patterns, tool_approval,
             (const char**)cfg.tool_allowlist,
             opt_tool_output,
-            print_chunk, NULL,
+            print_chunk, print_reasoning_chunk, NULL,
             use_spinner ? spinner_turn_start_cb : NULL,
             use_spinner ? spinner_turn_end_cb : NULL,
             &cp_result);
@@ -708,7 +714,7 @@ int main(int argc, char** argv)
 
         /* Run the agent loop */
         {
-            int ret = run_agent_loop(&agent, prompt, print_chunk, NULL,
+            int ret = run_agent_loop(&agent, prompt, print_chunk, print_reasoning_chunk, NULL,
                 use_spinner ? spinner_turn_start_cb : NULL,
                 use_spinner ? spinner_turn_end_cb : NULL, tool_approval,
                 (const char**)(cfg.tool_allowlist),

@@ -151,6 +151,7 @@ typedef struct
 {
     /* Streaming callbacks */
     chunk_fn on_chunk;
+    chunk_fn on_reasoning_chunk;
     void* on_chunk_data;
     turn_fn on_turn_start;
     turn_fn on_turn_end;
@@ -162,6 +163,7 @@ typedef struct
     /* Accumulated result */
     buf_t text;
     char* error;
+    int reasoning_seen; /* non-zero once any reasoning delta has been streamed */
 } copilot_ctx_t;
 
 /* ---- Tool callback ---- */
@@ -277,8 +279,31 @@ static void copilot_event_handler(copilot_event_type type, const char* data_json
             {
                 if (ctx->on_chunk)
                 {
+                    if (ctx->reasoning_seen)
+                    {
+                        ctx->on_chunk("\n", ctx->on_chunk_data);
+                        ctx->reasoning_seen = 0;
+                    }
                     ctx->on_chunk(delta->valuestring, ctx->on_chunk_data);
                 }
+            }
+            cJSON_Delete(root);
+        }
+        break;
+    }
+    case COPILOT_EVENT_ASSISTANT_REASONING_DELTA:
+    {
+        cJSON* root = cJSON_Parse(data_json);
+        if (root)
+        {
+            cJSON* delta = cJSON_GetObjectItem(root, "delta");
+            if (delta && cJSON_IsString(delta) && delta->valuestring[0])
+            {
+                if (ctx->on_reasoning_chunk)
+                {
+                    ctx->on_reasoning_chunk(delta->valuestring, ctx->on_chunk_data);
+                }
+                ctx->reasoning_seen = 1;
             }
             cJSON_Delete(root);
         }
@@ -325,7 +350,7 @@ int run_copilot_agent(const char* model, const char* system_prompt,
     const char* prompt, char** tool_patterns,
     const char* tool_approval, const char** tool_allowlist,
     int tool_output,
-    chunk_fn on_chunk, void* on_chunk_data,
+    chunk_fn on_chunk, chunk_fn on_reasoning_chunk, void* on_chunk_data,
     turn_fn on_turn_start, turn_fn on_turn_end,
     copilot_result_t* out)
 {
@@ -336,6 +361,7 @@ int run_copilot_agent(const char* model, const char* system_prompt,
     copilot_ctx_t ctx;
     memset(&ctx, 0, sizeof(ctx));
     ctx.on_chunk = on_chunk;
+    ctx.on_reasoning_chunk = on_reasoning_chunk;
     ctx.on_chunk_data = on_chunk_data;
     ctx.on_turn_start = on_turn_start;
     ctx.on_turn_end = on_turn_end;

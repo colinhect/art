@@ -208,7 +208,7 @@ static void format_tool_args(const tool_call_t* tc, buf_t* out)
 
 /* ---- Agent Loop ---- */
 
-int run_agent_loop(agent_t* agent, const char* prompt, chunk_fn on_chunk, void* on_chunk_data, turn_fn on_turn_start,
+int run_agent_loop(agent_t* agent, const char* prompt, chunk_fn on_chunk, chunk_fn on_reasoning_chunk, void* on_chunk_data, turn_fn on_turn_start,
     turn_fn on_turn_end, const char* tool_approval, const char** tool_allowlist, int tool_output, loop_result_t* out)
 {
     memset(out, 0, sizeof(*out));
@@ -219,7 +219,7 @@ int run_agent_loop(agent_t* agent, const char* prompt, chunk_fn on_chunk, void* 
     {
         on_turn_start(on_chunk_data);
     }
-    int ret = agent_send(agent, prompt, on_chunk, on_chunk_data, &resp);
+    int ret = agent_send(agent, prompt, on_chunk, on_reasoning_chunk, on_chunk_data, &resp);
     if (on_turn_end)
     {
         on_turn_end(on_chunk_data);
@@ -314,7 +314,7 @@ int run_agent_loop(agent_t* agent, const char* prompt, chunk_fn on_chunk, void* 
         {
             on_turn_start(on_chunk_data);
         }
-        ret = agent_send(agent, "", on_chunk, on_chunk_data, &resp);
+        ret = agent_send(agent, "", on_chunk, on_reasoning_chunk, on_chunk_data, &resp);
         if (on_turn_end)
         {
             on_turn_end(on_chunk_data);
